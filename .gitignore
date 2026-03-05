@@ -1,0 +1,29 @@
+# ── Environment ──────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ───────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# ── Virtual Environment ─────────────────
+venv/
+.venv/
+env/
+
+# ── IDE ──────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ───────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Data ─────────────────────────────────
+trade_history.json
+*.log
