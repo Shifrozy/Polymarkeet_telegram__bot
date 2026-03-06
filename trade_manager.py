@@ -321,29 +321,80 @@ class TradeManager:
 
         self._save_history()
 
-    def close_trade_tp(self, trade: Trade, exit_price: float):
-        """Close a trade due to take-profit hit."""
+    def _sell_tokens(self, trade: Trade, sell_price: float) -> tuple[bool, str]:
+        """
+        Place a SELL order on Polymarket CLOB to exit a position.
+        Returns (success, sell_order_id).
+        """
+        if PAPER_MODE:
+            return True, f"PAPER-SELL-{trade.trade_id}"
+
+        self._init_client()
+        if not self._client:
+            return False, "Client not initialized"
+
+        try:
+            from py_clob_client.clob_types import OrderArgs
+            from py_clob_client.order_builder.constants import SELL
+
+            # Sell at current price minus 1 cent for fast fill
+            limit_price = round(max(sell_price - 0.01, 0.01), 2)
+
+            order_args = OrderArgs(
+                token_id=trade.token_id,
+                price=limit_price,
+                size=trade.shares,
+                side=SELL,
+            )
+
+            signed = self._client.create_order(order_args)
+            resp = self._client.post_order(signed)
+
+            sell_order_id = ""
+            if isinstance(resp, dict):
+                sell_order_id = resp.get("orderID", resp.get("id", ""))
+                if resp.get("status") == "matched":
+                    sell_order_id = sell_order_id or "SELL-MATCHED"
+            else:
+                sell_order_id = str(resp)
+
+            return bool(sell_order_id), sell_order_id
+
+        except Exception as e:
+            self._last_error = f"Sell order error: {str(e)[:200]}"
+            return False, str(e)[:100]
+
+    def close_trade_tp(self, trade: Trade, exit_price: float) -> bool:
+        """Close a trade due to take-profit hit. Places SELL order."""
+        # Place actual SELL order on Polymarket
+        sold, sell_info = self._sell_tokens(trade, exit_price)
+
         trade.status = TradeStatus.TP_HIT
         trade.result_price = exit_price
         trade.pnl = (exit_price - trade.share_price) * trade.shares
-        trade.close_reason = "TAKE_PROFIT"
+        trade.close_reason = f"TAKE_PROFIT{'|SOLD' if sold else '|SELL_FAILED'}"
 
         if self.current_trade and self.current_trade.trade_id == trade.trade_id:
             self.current_trade = None
 
         self._save_history()
+        return sold
 
-    def close_trade_sl(self, trade: Trade, exit_price: float):
-        """Close a trade due to stop-loss hit."""
+    def close_trade_sl(self, trade: Trade, exit_price: float) -> bool:
+        """Close a trade due to stop-loss hit. Places SELL order."""
+        # Place actual SELL order on Polymarket
+        sold, sell_info = self._sell_tokens(trade, exit_price)
+
         trade.status = TradeStatus.SL_HIT
         trade.result_price = exit_price
         trade.pnl = (exit_price - trade.share_price) * trade.shares
-        trade.close_reason = "STOP_LOSS"
+        trade.close_reason = f"STOP_LOSS{'|SOLD' if sold else '|SELL_FAILED'}"
 
         if self.current_trade and self.current_trade.trade_id == trade.trade_id:
             self.current_trade = None
 
         self._save_history()
+        return sold
 
     def update_current_price(self, price: float):
         """Update the current price of the open trade."""

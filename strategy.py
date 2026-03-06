@@ -177,10 +177,7 @@ class StrategyEngine:
             return
 
         # Get live price for the token we bought
-        if trade.direction == TradeDirection.UP:
-            live_price = self.market.get_live_price(trade.token_id)
-        else:
-            live_price = self.market.get_live_price(trade.token_id)
+        live_price = self.market.get_live_price(trade.token_id)
 
         if live_price is None:
             return
@@ -196,7 +193,11 @@ class StrategyEngine:
                 f"🎯 TAKE-PROFIT HIT! Price: ${live_price:.4f} | "
                 f"Entry: ${trade.share_price:.4f}"
             )
-            self.trader.close_trade_tp(trade, live_price)
+            sold = self.trader.close_trade_tp(trade, live_price)
+            if sold:
+                self._log(f"💰 SOLD {trade.shares:.1f} shares @ ${live_price:.4f} — Profit locked!")
+            else:
+                self._log(f"⚠️ SELL order failed — tokens may still be held")
 
             if self.telegram:
                 self.telegram.send_trade_closed(trade)
@@ -210,7 +211,11 @@ class StrategyEngine:
                 f"🛑 STOP-LOSS HIT! Price: ${live_price:.4f} | "
                 f"Entry: ${trade.share_price:.4f}"
             )
-            self.trader.close_trade_sl(trade, live_price)
+            sold = self.trader.close_trade_sl(trade, live_price)
+            if sold:
+                self._log(f"📤 SOLD {trade.shares:.1f} shares @ ${live_price:.4f} — Loss cut!")
+            else:
+                self._log(f"⚠️ SELL order failed — tokens may still be held")
 
             if self.telegram:
                 self.telegram.send_trade_closed(trade)
