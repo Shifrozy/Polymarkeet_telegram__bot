@@ -36,6 +36,7 @@ TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 # ── Mode ────────────────────────────────────────────
 PAPER_MODE: bool = os.getenv("PAPER_MODE", "true").lower() == "true"
 AUTO_RESTART: bool = os.getenv("AUTO_RESTART", "true").lower() == "true"
+AUTO_REPEAT: bool = os.getenv("AUTO_REPEAT", "false").lower() == "true"
 
 
 class TradingConfig:
@@ -72,10 +73,9 @@ class TradingConfig:
         self.max_entry_wait_minutes: int = int(os.getenv("MAX_ENTRY_WAIT_MINUTES", "5"))
         self.tick_interval: int = int(os.getenv("TICK_INTERVAL", "5"))
 
-        # ── Strategy Parameters ─────────────────────
-        self.consecutive_candles_signal: int = 2
-        self.max_progressive_entries: int = 5
-        self.progressive_start: int = 3
+        # ── Auto-Repeat ─────────────────────────────
+        self.auto_repeat: bool = os.getenv("AUTO_REPEAT", "false").lower() == "true"
+        self.max_trades_per_day: int = int(os.getenv("MAX_TRADES_PER_DAY", "50"))
 
         # ── Candle interval mapping ─────────────────
         self._interval_map = {
@@ -145,6 +145,8 @@ class TradingConfig:
                 "cooldown_minutes": self.cooldown_minutes,
                 "max_entry_wait_minutes": self.max_entry_wait_minutes,
                 "tick_interval": self.tick_interval,
+                "auto_repeat": self.auto_repeat,
+                "max_trades_per_day": self.max_trades_per_day,
                 "bot_running": self.bot_running,
             }
 

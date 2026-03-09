@@ -162,19 +162,15 @@ class Dashboard:
         cfg = trading_config
 
         state_colors = {
-            BotState.SCANNING: ("🔍", "white"),
-            BotState.SIGNAL_DETECTED: ("🎯", "yellow"),
-            BotState.WAITING_ENTRY: ("⏳", "yellow"),
+            BotState.IDLE: ("💤", "white"),
             BotState.IN_TRADE: ("📊", "green"),
-            BotState.PROGRESSIVE: ("📈", "magenta"),
-            BotState.COOLDOWN: ("❄️", "blue"),
+            BotState.WAITING_MARKET: ("⏳", "yellow"),
             BotState.PAUSED: ("⏸️", "red"),
         }
         icon, color = state_colors.get(state.bot_state, ("❓", "white"))
 
         lines = [
             f"[bold]State:[/bold]          [{color}]{icon} {state.bot_state.value}[/{color}]",
-            f"[bold]Direction:[/bold]      {'[green]LONG ▲[/green]' if cfg.strategy_direction == 'LONG' else '[red]SHORT ▼[/red]'}",
             f"[bold]TP / SL:[/bold]        [green]{cfg.take_profit_pct:.0f}%[/green] / [red]{cfg.stop_loss_pct:.0f}%[/red]",
         ]
 
@@ -183,27 +179,20 @@ class Dashboard:
         else:
             lines.append(f"[bold]Trade Size:[/bold]    {cfg.trade_percent:.1f}% of portfolio")
 
-        if state.signal_direction:
-            dir_color = "green" if state.signal_direction == TradeDirection.UP else "red"
-            lines.append(
-                f"[bold]Signal:[/bold]         [{dir_color}]{state.signal_direction.value}[/{dir_color}]"
-            )
+        lines.append(f"[bold]Share Price:[/bold]  ${cfg.share_price:.2f}")
+        lines.append(f"[bold]Slippage:[/bold]     ${cfg.max_slippage:.3f}")
 
-        if state.progressive_entry > 0:
-            lines.append(f"[bold]Progressive #:[/bold]  {state.progressive_entry}/5")
+        # Auto-repeat status
+        if state.auto_repeat_active:
+            dir_text = state.auto_repeat_direction.value if state.auto_repeat_direction else "?"
+            dir_color = "green" if dir_text == "UP" else "red"
+            lines.append(f"\n[bold]Auto-Repeat:[/bold]  [bold {dir_color}]ON → {dir_text}[/bold {dir_color}]")
+        else:
+            lines.append(f"\n[bold]Auto-Repeat:[/bold]  [dim]OFF[/dim]")
 
-        if state.is_cooldown_active:
-            cd_sec = state.cooldown_remaining_sec
-            cd_min = int(cd_sec // 60)
-            cd_s = int(cd_sec % 60)
-            lines.append(f"[bold]Cooldown:[/bold]       [blue]{cd_min}m {cd_s}s remaining[/blue]")
-
-        if state.bot_state == BotState.WAITING_ENTRY:
-            wait = state.entry_wait_elapsed_sec
-            lines.append(f"[bold]Waiting:[/bold]        {int(wait)}s / {cfg.max_entry_wait_minutes * 60}s")
-
-        lines.append(f"\n[bold]Total Signals:[/bold]  {state.total_signals}")
-        lines.append(f"[bold]Skipped:[/bold]        {state.skipped_signals}")
+        lines.append(f"[bold]Trades Today:[/bold] {state.trades_today} / {cfg.max_trades_per_day}")
+        lines.append(f"[bold]Total Buys:[/bold]   {state.total_buys}")
+        lines.append(f"[bold]Total Sells:[/bold]  {state.total_sells}")
 
         return Panel(
             "\n".join(lines),
@@ -390,18 +379,20 @@ class Dashboard:
     def _build_config_bar(self) -> Panel:
         """Build the configuration bar."""
         cfg = trading_config
-        direction = "LONG" if cfg.strategy_direction == "LONG" else "SHORT"
+        state = self.engine.state
         size = f"${cfg.trade_amount}" if cfg.trade_size_mode == "fixed" else f"{cfg.trade_percent}%"
         status = "RUNNING" if cfg.bot_running else "PAUSED"
 
+        auto_rpt = "AUTO" if state.auto_repeat_active else "MANUAL"
+
         items = [
             f"Status: {status}",
-            f"Dir: {direction}",
+            f"Mode: {auto_rpt}",
             f"Size: {size}",
             f"TP: {cfg.take_profit_pct}%",
             f"SL: {cfg.stop_loss_pct}%",
+            f"Slip: ${cfg.max_slippage}",
             f"TF: {','.join(cfg.market_timeframes)}",
-            f"Tick: {cfg.tick_interval}s",
         ]
         config_text = "  │  ".join(items)
 
