@@ -175,9 +175,8 @@ class StrategyEngine:
                 f"Market: {tf}"
             )
 
-            # Send Telegram notification
-            if self.telegram:
-                self.telegram.send_trade_opened(trade)
+            # Telegram notification is sent by the command handler
+            # (not here, to avoid double messages)
 
             dir_text = "UP 🟢" if direction == TradeDirection.UP else "DOWN 🔴"
             return True, (
@@ -247,8 +246,7 @@ class StrategyEngine:
                 f"Market: {event.question[:40]}"
             )
 
-            if self.telegram:
-                self.telegram.send_trade_opened(trade)
+            # Telegram notification is sent by the command handler
 
             return True, (
                 f"✅ BUY <b>{outcome_name}</b> placed!\n\n"
@@ -297,8 +295,7 @@ class StrategyEngine:
             f"{'SOLD ✅' if sold else 'SELL FAILED ⚠️'}"
         )
 
-        if self.telegram:
-            self.telegram.send_trade_closed(trade)
+        # Telegram notification is sent by the command handler
 
         self.state.bot_state = BotState.IDLE
 

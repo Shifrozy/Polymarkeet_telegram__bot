@@ -278,6 +278,8 @@ class TelegramCommandHandler:
     def start(self):
         if not self.notifier.is_enabled:
             return
+        # Flush any old pending updates before starting
+        self._flush_old_updates()
         self._running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
@@ -287,13 +289,29 @@ class TelegramCommandHandler:
         if self._thread:
             self._thread.join(timeout=5)
 
+    def _flush_old_updates(self):
+        """Flush all pending Telegram updates so we don't re-process old commands."""
+        try:
+            resp = requests.get(
+                f"{self.notifier.base_url}/getUpdates",
+                params={"offset": -1, "timeout": 0},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get("result", [])
+                if results:
+                    self._last_update_id = results[-1]["update_id"]
+        except Exception:
+            pass
+
     def _poll_loop(self):
         while self._running:
             try:
                 self._poll_updates()
             except Exception as e:
                 print(f"Telegram poll error: {e}")
-            time.sleep(2)
+            time.sleep(1)
 
     def _poll_updates(self):
         try:
@@ -317,6 +335,15 @@ class TelegramCommandHandler:
                 chat_id = str(message.get("chat", {}).get("id", ""))
                 if chat_id != self.notifier.chat_id:
                     continue
+
+                # Ignore messages older than 30 seconds
+                msg_date = message.get("date", 0)
+                if msg_date > 0:
+                    import time as _time
+                    age = _time.time() - msg_date
+                    if age > 30:
+                        continue
+
                 text = message.get("text", "").strip()
                 if text.startswith("/"):
                     self._handle_command(text)

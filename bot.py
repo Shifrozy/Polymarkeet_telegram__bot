@@ -1,9 +1,9 @@
 """
-╬══════════════════════════════════════════════════════════════════════╗
+╔══════════════════════════════════════════════════════════════════════╗
 ║                                                                      ║
 ║      ₿  POLYMARKET TELEGRAM BOT  v3.0                               ║
-║      ──────────────────────────────────────                     ║
-║      Manual BUY/SELL via Telegram + Auto-Repeat                     ║
+║      ──────────────────────────────────────                          ║
+║      Manual BUY/SELL via Telegram + Auto-Repeat                      ║
 ║                                                                      ║
 ║      • /buy up, /buy down — trade BTC UP/DOWN markets               ║
 ║      • /search, /trade — trade any Polymarket event                 ║
@@ -11,7 +11,6 @@
 ║      • /auto up — auto-repeat on market resolution                  ║
 ║      • /set — change all parameters live via Telegram               ║
 ║      • TP/SL monitoring every tick                                  ║
-║      • Terminal dashboard with Rich                                  ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
@@ -28,7 +27,7 @@ import signal
 import argparse
 from datetime import datetime
 
-# Force UTF-8 for Windows terminal (Rich uses emojis)
+# Force UTF-8 for Windows terminal
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     try:
@@ -37,24 +36,16 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from rich.console import Console
-from rich.live import Live
-from rich.text import Text
-from rich.panel import Panel
-from rich import box
-
 import config
 from config import trading_config
 from candle_feed import CandleFeed
 from trade_manager import TradeManager
 from market_finder import MarketFinder
 from strategy import StrategyEngine
-from dashboard import Dashboard
 from telegram_bot import TelegramNotifier, TelegramCommandHandler
 
 
 # ── Globals ─────────────────────────────────────────
-console = Console()
 running = True
 
 
@@ -64,21 +55,24 @@ def signal_handler(sig, frame):
     running = False
 
 
+def log(msg: str):
+    """Print a timestamped log message."""
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[{ts}]  {msg}")
+
+
 def print_banner():
     """Print startup banner."""
-    banner = """
-[bold bright_blue]
-  ╔══════════════════════════════════════════════════════════╗
-  ║                                                          ║
-  ║   ₿  POLYMARKET TELEGRAM BOT  v3.0                      ║
-  ║   ──────────────────────────────────                     ║
-  ║   Manual Trading via Telegram                            ║
-  ║   + Auto-Repeat on Market Resolution                     ║
-  ║                                                          ║
-  ╚══════════════════════════════════════════════════════════╝
-[/bold bright_blue]
-"""
-    console.print(banner)
+    print()
+    print("  ╔══════════════════════════════════════════════════════════╗")
+    print("  ║                                                          ║")
+    print("  ║   ₿  POLYMARKET TELEGRAM BOT  v3.0                      ║")
+    print("  ║   ──────────────────────────────────                     ║")
+    print("  ║   Manual Trading via Telegram                            ║")
+    print("  ║   + Auto-Repeat on Market Resolution                     ║")
+    print("  ║                                                          ║")
+    print("  ╚══════════════════════════════════════════════════════════╝")
+    print()
 
 
 def print_strategy_summary():
@@ -86,36 +80,36 @@ def print_strategy_summary():
     cfg = trading_config
     size = f"${cfg.trade_amount:.2f} fixed" if cfg.trade_size_mode == "fixed" else f"{cfg.trade_percent:.1f}% of portfolio"
 
-    summary = f"""
-[bold white]Trading Setup:[/bold white]
-  [yellow]A.[/yellow] Mode:        [bold]Manual via Telegram[/bold] (/buy up, /buy down, /sell)
-  [yellow]B.[/yellow] Trade Size:  {size}
-  [yellow]C.[/yellow] Take-Profit: [green]{cfg.take_profit_pct:.0f}%[/green] | Stop-Loss: [red]{cfg.stop_loss_pct:.0f}%[/red]
-  [yellow]D.[/yellow] Markets:     {', '.join(cfg.market_timeframes)} (BTC UP/DOWN + custom)
-  [yellow]E.[/yellow] Auto-Repeat: {'ON' if cfg.auto_repeat else 'OFF'} (re-bet on market resolution)
-  [yellow]F.[/yellow] Max Slippage: ${cfg.max_slippage:.3f}
-  [yellow]G.[/yellow] Daily Limit: {cfg.max_trades_per_day} trades/day
-  [yellow]H.[/yellow] Commands:    /help for full list
-"""
-    console.print(Panel(summary, title="Trading Setup", border_style="cyan"))
+    print("  ┌─────────────────────────────────────────────┐")
+    print("  │             Trading Setup                    │")
+    print("  ├─────────────────────────────────────────────┤")
+    print(f"  │  Mode:        Manual via Telegram            │")
+    print(f"  │  Trade Size:  {size:<30s}│")
+    print(f"  │  TP / SL:     {cfg.take_profit_pct:.0f}% / {cfg.stop_loss_pct:.0f}%{' ' * (27 - len(f'{cfg.take_profit_pct:.0f}% / {cfg.stop_loss_pct:.0f}%'))}│")
+    print(f"  │  Markets:     {', '.join(cfg.market_timeframes):<30s}│")
+    print(f"  │  Slippage:    ${cfg.max_slippage:.3f}{' ' * (28 - len(f'${cfg.max_slippage:.3f}'))}│")
+    print(f"  │  Auto-Repeat: {'ON' if cfg.auto_repeat else 'OFF':<30s}│")
+    print(f"  │  Daily Limit: {cfg.max_trades_per_day} trades/day{' ' * (20 - len(str(cfg.max_trades_per_day)))}│")
+    print("  │  Commands:    /help for full list            │")
+    print("  └─────────────────────────────────────────────┘")
+    print()
 
 
 def validate_and_start():
     """Validate configuration and start the bot."""
     errors = config.validate_config()
     if errors:
-        console.print("\n[bold red]❌ Configuration Errors:[/bold red]")
+        print("\n  ❌ Configuration Errors:")
         for err in errors:
-            console.print(f"  • {err}")
-        console.print(
-            "\n[dim]Copy .env.example to .env and fill in your credentials.[/dim]"
-        )
+            print(f"    • {err}")
+        print("\n  Copy .env.example to .env and fill in your credentials.")
         sys.exit(1)
 
-    mode = "[red]🔴 PAPER MODE[/red]" if config.PAPER_MODE else "[green]🟢 LIVE TRADING[/green]"
-    console.print(f"\n  Mode: {mode}")
-    console.print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    console.print()
+    mode = "PAPER MODE" if config.PAPER_MODE else "LIVE TRADING"
+    mode_icon = "🔴" if config.PAPER_MODE else "🟢"
+    print(f"  Mode: {mode_icon} {mode}")
+    print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
 
 
 def run_bot():
@@ -126,37 +120,27 @@ def run_bot():
     cfg = trading_config
 
     # Initialize Telegram
-    console.print("[dim]Initializing Telegram...[/dim]")
+    log("Initializing Telegram...")
     telegram = TelegramNotifier()
     if telegram.is_enabled:
-        console.print("[green]✓[/green] Telegram connected")
+        log("✓ Telegram connected")
     else:
-        console.print("[yellow]⚠ Telegram not configured — notifications disabled[/yellow]")
+        log("⚠ Telegram not configured — notifications disabled")
 
     # Initialize components
-    console.print("[dim]Initializing components...[/dim]")
+    log("Initializing components...")
     feed = CandleFeed(interval=cfg.get_candle_interval())
     trader = TradeManager()
     finder = MarketFinder()
 
-    # Create strategy engine
-    dashboard = None
-
-    def on_log(msg: str):
-        if dashboard:
-            dashboard.add_log(msg)
-
+    # Create strategy engine with console logging
     engine = StrategyEngine(
         candle_feed=feed,
         trade_manager=trader,
         market_finder=finder,
         telegram=telegram,
-        on_log=on_log,
+        on_log=log,
     )
-
-    # Create dashboard
-    dashboard_obj = Dashboard(engine=engine, feed=feed, trader=trader)
-    dashboard = dashboard_obj
 
     # Start Telegram command handler
     cmd_handler = TelegramCommandHandler(
@@ -167,97 +151,119 @@ def run_bot():
     )
     cmd_handler.start()
     if telegram.is_enabled:
-        console.print("[green]✓[/green] Telegram command handler started")
+        log("✓ Telegram command handler started")
 
     # Initial data fetch
-    console.print("[dim]Fetching initial candle data...[/dim]")
+    log("Fetching BTC price data...")
     try:
         feed.fetch_recent(limit=10)
         btc = feed.get_btc_price()
-        console.print(f"[green]✓[/green] BTC Price: ${btc:,.2f}")
-        console.print(f"[green]✓[/green] Loaded {len(feed.get_closed_candles())} closed candles")
+        log(f"✓ BTC Price: ${btc:,.2f}")
+        log(f"✓ Loaded {len(feed.get_closed_candles())} closed candles")
     except Exception as e:
-        console.print(f"[red]✗ Failed to fetch candle data: {e}[/red]")
-        console.print("[dim]Will retry when bot starts...[/dim]")
+        log(f"✗ Failed to fetch candle data: {e}")
+        log("  Will retry when bot starts...")
 
     # Check for market
-    console.print("[dim]Searching for BTC markets on Polymarket...[/dim]")
+    log("Searching for BTC markets on Polymarket...")
     for tf in cfg.market_timeframes:
         market = finder.find_market_for_timeframe(tf)
         if market:
-            console.print(f"[green]✓[/green] [{tf}] Found: {market.question[:60]}...")
+            log(f"✓ [{tf}] Found: {market.question[:60]}")
         else:
-            console.print(f"[yellow]⚠ [{tf}] No active market found[/yellow]")
+            log(f"⚠ [{tf}] No active market found")
 
-    console.print("\n[bold green]✅ Bot started! Press Ctrl+C to stop.[/bold green]\n")
+    print()
+    print("  ✅ Bot started! Waiting for Telegram commands.")
+    print("  ── Send /help in Telegram for all commands ──")
+    print("  ── Press Ctrl+C to stop ──")
+    print()
 
     # Send Telegram startup notification
     telegram.send_bot_started()
 
-    time.sleep(2)
-
-    # Main loop with live dashboard
-    tick_interval = cfg.tick_interval
+    # Main loop — simple console logging
     last_tick = 0
+    last_status = 0
+    STATUS_INTERVAL = 60  # Print status every 60 seconds
 
-    with Live(
-        dashboard_obj.render(),
-        console=console,
-        refresh_per_second=1,
-        screen=True,
-    ) as live:
-        while running:
-            now = time.time()
+    while running:
+        now = time.time()
 
-            # Check if candle interval needs updating
-            current_interval = cfg.get_candle_interval()
-            if feed.interval != current_interval:
-                feed.set_interval(current_interval)
-                dashboard_obj.add_log(f"🔄 Candle interval changed to {current_interval}")
+        # Check if candle interval needs updating
+        current_interval = cfg.get_candle_interval()
+        if feed.interval != current_interval:
+            feed.set_interval(current_interval)
+            log(f"Candle interval changed to {current_interval}")
 
-            # Process strategy tick
-            if now - last_tick >= cfg.tick_interval:
-                try:
-                    engine.process_tick()
-                except Exception as e:
-                    dashboard_obj.add_log(f"[red]⚠ Error: {str(e)[:50]}[/red]")
-                    telegram.send_error(str(e)[:200])
-                last_tick = now
-
-            # Update dashboard
+        # Process strategy tick
+        if now - last_tick >= cfg.tick_interval:
             try:
-                live.update(dashboard_obj.render())
-            except Exception:
-                pass
+                engine.process_tick()
+            except Exception as e:
+                log(f"⚠ Error: {str(e)[:100]}")
+                telegram.send_error(str(e)[:200])
+            last_tick = now
 
-            time.sleep(0.5)
+        # Print periodic status
+        if now - last_status >= STATUS_INTERVAL:
+            state = engine.state
+            trade_info = ""
+            if trader.has_open_trade():
+                t = trader.current_trade
+                upnl = t.unrealized_pnl
+                sign = "+" if upnl >= 0 else ""
+                trade_info = f" | Open: {t.direction_emoji} ${t.amount:.2f} P&L:{sign}${upnl:.2f}"
+
+            auto_info = ""
+            if state.auto_repeat_active:
+                auto_info = f" | Auto: {state.auto_repeat_direction.value}" if state.auto_repeat_direction else ""
+
+            try:
+                btc = feed.get_btc_price()
+                btc_text = f"BTC: ${btc:,.0f}" if btc > 0 else "BTC: ---"
+            except Exception:
+                btc_text = "BTC: ---"
+
+            log(
+                f"[{state.bot_state.value}] {btc_text} | "
+                f"Trades: {state.trades_today}/{cfg.max_trades_per_day} | "
+                f"P&L: ${trader.total_pnl:+.2f}{trade_info}{auto_info}"
+            )
+            last_status = now
+
+        time.sleep(0.5)
 
     # Shutdown
     cmd_handler.stop()
     telegram.send_bot_stopped()
 
-    console.print("\n[yellow]🛑 Bot stopped by user.[/yellow]")
-    console.print(f"[dim]Total trades: {trader.total_trades} | P&L: ${trader.total_pnl:+.2f}[/dim]")
+    print()
+    log("🛑 Bot stopped by user.")
+    log(f"Total trades: {trader.total_trades} | P&L: ${trader.total_pnl:+.2f}")
 
 
 def show_status():
     """Show current bot status and exit."""
     trader = TradeManager()
-    console.print("\n[bold]📊 Bot Status[/bold]\n")
-    console.print(f"  Total Trades:  {trader.total_trades}")
-    console.print(f"  Wins:          {trader.wins}")
-    console.print(f"  Losses:        {trader.losses}")
-    console.print(f"  Win Rate:      {trader.win_rate:.1f}%")
-    console.print(f"  Total P&L:     ${trader.total_pnl:+.2f}")
-    console.print(f"  Daily P&L:     ${trader.daily_pnl:+.2f}")
-    console.print(f"  Total Volume:  ${trader.total_volume:.2f}")
+    print()
+    print("  📊 Bot Status")
+    print("  ─────────────")
+    print(f"  Total Trades:  {trader.total_trades}")
+    print(f"  Wins:          {trader.wins}")
+    print(f"  Losses:        {trader.losses}")
+    print(f"  Win Rate:      {trader.win_rate:.1f}%")
+    print(f"  Total P&L:     ${trader.total_pnl:+.2f}")
+    print(f"  Daily P&L:     ${trader.daily_pnl:+.2f}")
+    print(f"  Total Volume:  ${trader.total_volume:.2f}")
 
     if trader.recent_trades:
-        console.print("\n[bold]Recent Trades:[/bold]")
+        print()
+        print("  Recent Trades:")
         for t in trader.recent_trades:
-            pnl_str = f"[green]+${t.pnl:.2f}[/green]" if t.pnl >= 0 else f"[red]${t.pnl:.2f}[/red]"
-            console.print(f"  {t.status_emoji} {t.direction_emoji} | {t.entry_time} | {pnl_str} | {t.close_reason}")
-    console.print()
+            pnl_sign = "+" if t.pnl >= 0 else ""
+            print(f"    {t.status_emoji} {t.direction_emoji} | {t.entry_time} | {pnl_sign}${t.pnl:.2f} | {t.close_reason}")
+    print()
 
 
 def main():
