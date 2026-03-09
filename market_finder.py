@@ -114,31 +114,46 @@ class MarketFinder:
     # ── General Market Discovery ─────────────────────
 
     def search_markets(self, query: str, limit: int = 8) -> list[PolymarketEvent]:
-        """Search for any market on Polymarket."""
+        """Search for any market on Polymarket using client-side keyword filter."""
         try:
-            resp = self.session.get(
-                f"{GAMMA_API}/markets",
-                params={
-                    "search": query,
-                    "limit": limit,
-                    "active": "true",
-                    "closed": "false",
-                },
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                return []
+            # Fetch a large pool of active markets sorted by liquidity
+            all_markets = []
+            for offset in [0, 100]:
+                resp = self.session.get(
+                    f"{GAMMA_API}/markets",
+                    params={
+                        "limit": 100,
+                        "offset": offset,
+                        "active": "true",
+                        "closed": "false",
+                        "order": "liquidityNum",
+                        "ascending": "false",
+                    },
+                    timeout=15,
+                )
+                if resp.status_code != 200:
+                    break
+                batch = resp.json()
+                if not isinstance(batch, list):
+                    break
+                all_markets.extend(batch)
+                if len(batch) < 100:
+                    break
 
-            markets_data = resp.json()
-            if not isinstance(markets_data, list):
-                return []
+            # Filter by keyword in question text
+            query_lower = query.lower()
+            keywords = query_lower.split()
+            matching = []
+            for data in all_markets:
+                question = data.get("question", "").lower()
+                slug = data.get("slug", "").lower()
+                # All keywords must match
+                if all(kw in question or kw in slug for kw in keywords):
+                    event = self._parse_event(data)
+                    if event and event.is_tradeable:
+                        matching.append(event)
 
-            results = []
-            for data in markets_data:
-                event = self._parse_event(data)
-                if event and event.is_tradeable:
-                    results.append(event)
-            return results[:limit]
+            return matching[:limit]
         except Exception as e:
             print(f"Search error: {e}")
             return []

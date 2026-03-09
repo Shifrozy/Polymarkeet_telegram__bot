@@ -1,16 +1,16 @@
 """
-╔══════════════════════════════════════════════════════════════════════╗
+╬══════════════════════════════════════════════════════════════════════╗
 ║                                                                      ║
-║      ₿  POLYMARKET TELEGRAM BOT  v2.0                               ║
-║      ─────────────────────────────────                               ║
-║      Configurable BTC Strategy Bot with Telegram Integration         ║
+║      ₿  POLYMARKET TELEGRAM BOT  v3.0                               ║
+║      ──────────────────────────────────────                     ║
+║      Manual BUY/SELL via Telegram + Auto-Repeat                     ║
 ║                                                                      ║
-║      • Choose LONG or SHORT direction                                ║
-║      • Configurable TP% and SL%                                      ║
-║      • Fixed amount or % of portfolio                                ║
-║      • Multi-timeframe market selection (5m, 15m, 1h, 1d)           ║
-║      • Continuous auto re-entry after trade closes                   ║
-║      • Telegram notifications + live commands                        ║
+║      • /buy up, /buy down — trade BTC UP/DOWN markets               ║
+║      • /search, /trade — trade any Polymarket event                 ║
+║      • /sell — close position anytime                               ║
+║      • /auto up — auto-repeat on market resolution                  ║
+║      • /set — change all parameters live via Telegram               ║
+║      • TP/SL monitoring every tick                                  ║
 ║      • Terminal dashboard with Rich                                  ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
@@ -70,10 +70,10 @@ def print_banner():
 [bold bright_blue]
   ╔══════════════════════════════════════════════════════════╗
   ║                                                          ║
-  ║   ₿  POLYMARKET TELEGRAM BOT  v2.0                      ║
+  ║   ₿  POLYMARKET TELEGRAM BOT  v3.0                      ║
   ║   ──────────────────────────────────                     ║
-  ║   Configurable Strategy with Telegram                    ║
-  ║   Notifications & Live Commands                          ║
+  ║   Manual Trading via Telegram                            ║
+  ║   + Auto-Repeat on Market Resolution                     ║
   ║                                                          ║
   ╚══════════════════════════════════════════════════════════╝
 [/bold bright_blue]
@@ -82,23 +82,22 @@ def print_banner():
 
 
 def print_strategy_summary():
-    """Print a summary of the bot's strategy."""
+    """Print a summary of the trading setup."""
     cfg = trading_config
-    direction = "LONG (buy UP)" if cfg.strategy_direction == "LONG" else "SHORT (buy DOWN)"
     size = f"${cfg.trade_amount:.2f} fixed" if cfg.trade_size_mode == "fixed" else f"{cfg.trade_percent:.1f}% of portfolio"
 
     summary = f"""
-[bold white]Strategy Summary:[/bold white]
-  [yellow]A.[/yellow] Direction: [bold]{direction}[/bold]
-  [yellow]B.[/yellow] Trade Size: {size}
+[bold white]Trading Setup:[/bold white]
+  [yellow]A.[/yellow] Mode:        [bold]Manual via Telegram[/bold] (/buy up, /buy down, /sell)
+  [yellow]B.[/yellow] Trade Size:  {size}
   [yellow]C.[/yellow] Take-Profit: [green]{cfg.take_profit_pct:.0f}%[/green] | Stop-Loss: [red]{cfg.stop_loss_pct:.0f}%[/red]
-  [yellow]D.[/yellow] Markets: {', '.join(cfg.market_timeframes)}
-  [yellow]E.[/yellow] Continuous execution: auto re-entry after trade closes
-  [yellow]F.[/yellow] Progressive entries on losses (up to candle #5)
-  [yellow]G.[/yellow] Telegram notifications on trade open/close/P&L
-  [yellow]H.[/yellow] Live commands: /status /config /set /stop /start
+  [yellow]D.[/yellow] Markets:     {', '.join(cfg.market_timeframes)} (BTC UP/DOWN + custom)
+  [yellow]E.[/yellow] Auto-Repeat: {'ON' if cfg.auto_repeat else 'OFF'} (re-bet on market resolution)
+  [yellow]F.[/yellow] Max Slippage: ${cfg.max_slippage:.3f}
+  [yellow]G.[/yellow] Daily Limit: {cfg.max_trades_per_day} trades/day
+  [yellow]H.[/yellow] Commands:    /help for full list
 """
-    console.print(Panel(summary, title="🧠 Strategy", border_style="cyan"))
+    console.print(Panel(summary, title="Trading Setup", border_style="cyan"))
 
 
 def validate_and_start():
@@ -263,7 +262,7 @@ def show_status():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Polymarket Telegram Bot — Configurable BTC Strategy"
+        description="Polymarket Telegram Bot - Manual Trading via Telegram"
     )
     parser.add_argument(
         "--live", action="store_true",
