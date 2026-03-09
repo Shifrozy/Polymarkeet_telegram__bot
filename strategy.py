@@ -453,7 +453,15 @@ class StrategyEngine:
             self._after_trade_close()
 
     def _after_trade_close(self):
-        """Handle post-trade logic: auto-repeat or go idle."""
+        """Handle post-trade logic: auto-redeem if profitable, then auto-repeat or go idle."""
+        import threading
+
+        # Auto-redeem winning tokens back to USDC
+        trade = self.trader.current_trade
+        if trade and trade.pnl >= 0:
+            self._log("🔄 Auto-redeem: converting winning tokens to USDC...")
+            threading.Thread(target=self._run_auto_redeem, daemon=True).start()
+
         if self.state.auto_repeat_active and self.state.auto_repeat_direction:
             self.state.bot_state = BotState.WAITING_MARKET
             self.state.waiting_market_since = time.time()
@@ -463,4 +471,29 @@ class StrategyEngine:
             )
         else:
             self.state.bot_state = BotState.IDLE
-            self._log("💤 Trade closed. Waiting for /buy command...")
+            self._log("Trade closed. Waiting for /buy command...")
+
+    def _run_auto_redeem(self):
+        """Background task: redeem winning tokens to USDC."""
+        try:
+            # Wait a few seconds for market to fully settle
+            time.sleep(5)
+
+            if self.trader._redeem_manager:
+                redeemed = self.trader._redeem_manager.auto_redeem()
+                if redeemed > 0:
+                    self._log(f"✅ Auto-redeem: {redeemed} position(s) redeemed to USDC!")
+                    if self.telegram:
+                        bal = self.trader._redeem_manager.get_usdc_balance()
+                        self.telegram.send(
+                            f"✅ <b>AUTO-REDEEM</b>\n\n"
+                            f"Redeemed {redeemed} position(s) to USDC\n"
+                            f"Balance: <b>${bal:.2f}</b>"
+                        )
+                else:
+                    self._log("Auto-redeem: no positions to redeem (may settle later)")
+            else:
+                self._log("Auto-redeem: redeem manager not available")
+        except Exception as e:
+            self._log(f"Auto-redeem error: {str(e)[:100]}")
+
