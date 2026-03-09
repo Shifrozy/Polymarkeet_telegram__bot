@@ -192,6 +192,76 @@ class StrategyEngine:
             err = self.trader._last_error or "Unknown error"
             return False, f"❌ Trade failed: {err}"
 
+    # ── Manual BUY on Custom Market ──────────────────
+
+    def manual_buy_custom(self, event, outcome_index: int) -> tuple[bool, str]:
+        """
+        Place a manual BUY on any Polymarket event.
+        outcome_index: 0 = first outcome (Yes/Up), 1 = second (No/Down), etc.
+        Returns (success, message).
+        """
+        from market_finder import PolymarketEvent
+        cfg = trading_config
+
+        if not cfg.bot_running:
+            return False, "⏸️ Bot is paused. Use /start first."
+
+        if self.trader.has_open_trade():
+            return False, "⚠️ Already have an open trade. /sell first or wait for resolution."
+
+        if self.state.trades_today >= cfg.max_trades_per_day:
+            return False, f"⛔ Daily limit reached ({cfg.max_trades_per_day} trades/day)"
+
+        token_id = event.get_token_for_outcome(outcome_index)
+        if not token_id:
+            return False, f"❌ Invalid outcome index: {outcome_index}"
+
+        current_price = event.get_price_for_outcome(outcome_index)
+        outcome_name = event.outcomes[outcome_index] if outcome_index < len(event.outcomes) else f"#{outcome_index}"
+
+        # Store the custom market for monitoring
+        self.market.custom_market = event
+
+        # Determine direction for tracking
+        direction = TradeDirection.UP if outcome_index == 0 else TradeDirection.DOWN
+
+        trade = self.trader.place_trade(
+            direction=direction,
+            token_id=token_id,
+            candle_number=1,
+            current_price=current_price,
+            timeframe="custom",
+        )
+
+        if trade:
+            self.state.bot_state = BotState.IN_TRADE
+            self.state.last_direction = direction
+            self.state.last_timeframe = "custom"
+            self.state.last_trade_time = time.time()
+            self.state.trades_today += 1
+            self.state.total_buys += 1
+
+            self._log(
+                f"🛒 BUY '{outcome_name}' | ${trade.amount:.2f} | "
+                f"{trade.shares:.1f} shares @ ${trade.share_price:.4f} | "
+                f"Market: {event.question[:40]}"
+            )
+
+            if self.telegram:
+                self.telegram.send_trade_opened(trade)
+
+            return True, (
+                f"✅ BUY <b>{outcome_name}</b> placed!\n\n"
+                f"📋 Market: {event.question[:60]}\n"
+                f"💰 Stake: ${trade.amount:.2f}\n"
+                f"📊 Shares: {trade.shares:.1f} @ ${trade.share_price:.4f}\n"
+                f"🎯 TP: {cfg.take_profit_pct:.0f}% | 🛑 SL: {cfg.stop_loss_pct:.0f}%\n"
+                f"📝 Order: {trade.order_id[:20]}..."
+            )
+        else:
+            err = self.trader._last_error or "Unknown error"
+            return False, f"❌ Trade failed: {err}"
+
     # ── Manual SELL (called from Telegram) ───────────
 
     def manual_sell(self) -> tuple[bool, str]:

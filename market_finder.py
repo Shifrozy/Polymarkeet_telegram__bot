@@ -1,19 +1,74 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║   POLYMARKET TELEGRAM BOT — MARKET FINDER                   ║
+║   POLYMARKET TELEGRAM BOT — MARKET FINDER v3.0              ║
 ╚══════════════════════════════════════════════════════════════╝
-Finds and manages BTC UP/DOWN markets on Polymarket
-using the Gamma API. Supports multiple timeframes.
+Finds BTC UP/DOWN markets + any custom Polymarket event.
+Supports search, trending, and direct slug/ID lookup.
 """
 
 import time
 import math
 import json
 import requests
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 from config import GAMMA_API, CLOB_HOST, trading_config
 
+
+# ── General Market (any Polymarket event) ────────────
+
+@dataclass
+class PolymarketEvent:
+    """Any Polymarket event/market."""
+    condition_id: str
+    question: str
+    slug: str
+    outcomes: list[str]
+    token_ids: list[str]
+    prices: list[float]
+    end_time: float
+    active: bool
+    accepting_orders: bool
+    liquidity: float
+    volume: float = 0.0
+    category: str = ""
+    image: str = ""
+
+    @property
+    def is_tradeable(self) -> bool:
+        return self.active and self.accepting_orders
+
+    @property
+    def is_expired(self) -> bool:
+        return self.end_time > 0 and time.time() > self.end_time
+
+    @property
+    def minutes_until_close(self) -> float:
+        if self.end_time <= 0:
+            return 999999
+        return max(0, (self.end_time - time.time()) / 60)
+
+    @property
+    def outcome_summary(self) -> str:
+        """e.g., 'Yes: $0.65 | No: $0.35'"""
+        parts = []
+        for i, outcome in enumerate(self.outcomes):
+            price = self.prices[i] if i < len(self.prices) else 0
+            parts.append(f"{outcome}: ${price:.2f}")
+        return " | ".join(parts)
+
+    def get_token_for_outcome(self, outcome_index: int) -> Optional[str]:
+        if 0 <= outcome_index < len(self.token_ids):
+            return self.token_ids[outcome_index]
+        return None
+
+    def get_price_for_outcome(self, outcome_index: int) -> float:
+        if 0 <= outcome_index < len(self.prices):
+            return self.prices[outcome_index]
+        return 0.0
+
+
+# ── BTC UP/DOWN Market ───────────────────────────────
 
 @dataclass
 class BTCMarket:
@@ -46,16 +101,173 @@ class BTCMarket:
 
 
 class MarketFinder:
-    """Finds BTC UP/DOWN markets on Polymarket across multiple timeframes."""
+    """Finds BTC UP/DOWN markets + any custom Polymarket event."""
 
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
         self._cache: dict[str, tuple[BTCMarket, float]] = {}
         self._cache_ttl: float = 30
+        # Store currently selected custom market
+        self.custom_market: Optional[PolymarketEvent] = None
+
+    # ── General Market Discovery ─────────────────────
+
+    def search_markets(self, query: str, limit: int = 8) -> list[PolymarketEvent]:
+        """Search for any market on Polymarket."""
+        try:
+            resp = self.session.get(
+                f"{GAMMA_API}/markets",
+                params={
+                    "search": query,
+                    "limit": limit,
+                    "active": "true",
+                    "closed": "false",
+                },
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                return []
+
+            markets_data = resp.json()
+            if not isinstance(markets_data, list):
+                return []
+
+            results = []
+            for data in markets_data:
+                event = self._parse_event(data)
+                if event and event.is_tradeable:
+                    results.append(event)
+            return results[:limit]
+        except Exception as e:
+            print(f"Search error: {e}")
+            return []
+
+    def get_trending_markets(self, limit: int = 8) -> list[PolymarketEvent]:
+        """Get trending/popular markets."""
+        try:
+            resp = self.session.get(
+                f"{GAMMA_API}/markets",
+                params={
+                    "limit": limit,
+                    "active": "true",
+                    "closed": "false",
+                    "order": "liquidityNum",
+                    "ascending": "false",
+                },
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                return []
+
+            markets_data = resp.json()
+            if not isinstance(markets_data, list):
+                return []
+
+            results = []
+            for data in markets_data:
+                event = self._parse_event(data)
+                if event and event.is_tradeable:
+                    results.append(event)
+            return results[:limit]
+        except Exception:
+            return []
+
+    def get_market_by_slug(self, slug: str) -> Optional[PolymarketEvent]:
+        """Get a specific market by its slug."""
+        try:
+            resp = self.session.get(
+                f"{GAMMA_API}/markets/slug/{slug}",
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return None
+
+            text = resp.text.strip()
+            if text == "null" or not text:
+                return None
+
+            data = resp.json()
+            return self._parse_event(data)
+        except Exception:
+            return None
+
+    def get_market_by_condition(self, condition_id: str) -> Optional[PolymarketEvent]:
+        """Get a market by condition ID."""
+        try:
+            resp = self.session.get(
+                f"{GAMMA_API}/markets",
+                params={"condition_id": condition_id},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return None
+
+            data = resp.json()
+            if isinstance(data, list) and len(data) > 0:
+                return self._parse_event(data[0])
+            elif isinstance(data, dict):
+                return self._parse_event(data)
+            return None
+        except Exception:
+            return None
+
+    def _parse_event(self, data: dict) -> Optional[PolymarketEvent]:
+        """Parse any Gamma API response into PolymarketEvent."""
+        try:
+            clob_ids_raw = data.get("clobTokenIds", "[]")
+            if isinstance(clob_ids_raw, str):
+                clob_ids = json.loads(clob_ids_raw)
+            else:
+                clob_ids = clob_ids_raw
+
+            if not clob_ids:
+                return None
+
+            outcomes_raw = data.get("outcomes", '["Yes", "No"]')
+            if isinstance(outcomes_raw, str):
+                outcomes = json.loads(outcomes_raw)
+            else:
+                outcomes = outcomes_raw
+
+            prices_raw = data.get("outcomePrices", '[]')
+            if isinstance(prices_raw, str):
+                prices_list = json.loads(prices_raw)
+            else:
+                prices_list = prices_raw
+            prices = [float(p) for p in prices_list] if prices_list else []
+
+            end_time = 0.0
+            end_date_str = data.get("endDate", "")
+            if end_date_str:
+                from datetime import datetime, timezone
+                try:
+                    dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    end_time = dt.timestamp()
+                except Exception:
+                    pass
+
+            return PolymarketEvent(
+                condition_id=data.get("conditionId", ""),
+                question=data.get("question", "Unknown"),
+                slug=data.get("slug", ""),
+                outcomes=outcomes,
+                token_ids=clob_ids,
+                prices=prices,
+                end_time=end_time,
+                active=data.get("active", False),
+                accepting_orders=data.get("acceptingOrders", False),
+                liquidity=float(data.get("liquidityNum", 0)),
+                volume=float(data.get("volumeNum", 0)),
+                category=data.get("category", ""),
+                image=data.get("image", ""),
+            )
+        except Exception:
+            return None
+
+    # ── BTC UP/DOWN Market Discovery ─────────────────
 
     def _get_boundaries(self, timeframe: str) -> list[int]:
-        """Get epoch timestamps for interval boundaries."""
         interval_sec = trading_config.get_interval_seconds(timeframe)
         now = time.time()
         current = math.floor(now / interval_sec) * interval_sec
@@ -66,8 +278,7 @@ class MarketFinder:
             current + interval_sec * 2,
         ]
 
-    def _parse_market(self, data: dict, timeframe: str = "15m") -> Optional[BTCMarket]:
-        """Parse a Gamma API market response into BTCMarket."""
+    def _parse_btc_market(self, data: dict, timeframe: str = "15m") -> Optional[BTCMarket]:
         try:
             clob_ids_raw = data.get("clobTokenIds", "[]")
             if isinstance(clob_ids_raw, str):
@@ -144,7 +355,6 @@ class MarketFinder:
             return None
 
     def find_market_for_timeframe(self, timeframe: str) -> Optional[BTCMarket]:
-        """Find the current active BTC market for a specific timeframe."""
         cache_key = timeframe
         if cache_key in self._cache:
             cached_market, cached_time = self._cache[cache_key]
@@ -165,14 +375,11 @@ class MarketFinder:
                 )
                 if resp.status_code != 200:
                     continue
-
                 text = resp.text.strip()
                 if text == "null" or not text:
                     continue
-
                 data = resp.json()
-                market = self._parse_market(data, timeframe)
-
+                market = self._parse_btc_market(data, timeframe)
                 if market and market.is_tradeable and market.end_time > now:
                     if best_market is None or market.end_time < best_market.end_time:
                         best_market = market
@@ -181,11 +388,9 @@ class MarketFinder:
 
         if best_market:
             self._cache[cache_key] = (best_market, time.time())
-
         return best_market
 
     def find_current_market(self) -> Optional[BTCMarket]:
-        """Find the best market across all configured timeframes."""
         for tf in trading_config.market_timeframes:
             market = self.find_market_for_timeframe(tf)
             if market:
@@ -193,14 +398,14 @@ class MarketFinder:
         return None
 
     def find_all_markets(self) -> dict[str, Optional[BTCMarket]]:
-        """Find markets for all configured timeframes."""
         result = {}
         for tf in trading_config.market_timeframes:
             result[tf] = self.find_market_for_timeframe(tf)
         return result
 
+    # ── Live Prices ──────────────────────────────────
+
     def get_live_price(self, token_id: str) -> Optional[float]:
-        """Get live midpoint price from CLOB."""
         try:
             resp = self.session.get(
                 f"{CLOB_HOST}/midpoint",
@@ -217,13 +422,18 @@ class MarketFinder:
         return None
 
     def refresh_market_prices(self, market: BTCMarket) -> BTCMarket:
-        """Refresh live prices for a market."""
         up_price = self.get_live_price(market.token_id_up)
         down_price = self.get_live_price(market.token_id_down)
-
         if up_price is not None:
             market.price_up = up_price
         if down_price is not None:
             market.price_down = down_price
-
         return market
+
+    def refresh_event_prices(self, event: PolymarketEvent) -> PolymarketEvent:
+        """Refresh live prices for a custom market event."""
+        for i, token_id in enumerate(event.token_ids):
+            price = self.get_live_price(token_id)
+            if price is not None and i < len(event.prices):
+                event.prices[i] = price
+        return event

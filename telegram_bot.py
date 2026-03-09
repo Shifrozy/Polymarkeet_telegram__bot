@@ -273,6 +273,7 @@ class TelegramCommandHandler:
         self._last_update_id = 0
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._search_results: list = []  # Cache for /trade command
 
     def start(self):
         if not self.notifier.is_enabled:
@@ -331,6 +332,9 @@ class TelegramCommandHandler:
             "/buy": self._cmd_buy,
             "/sell": self._cmd_sell,
             "/auto": self._cmd_auto,
+            "/search": self._cmd_search,
+            "/trending": self._cmd_trending,
+            "/trade": self._cmd_trade,
             "/status": self._cmd_status,
             "/config": self._cmd_config,
             "/set": self._cmd_set,
@@ -358,12 +362,16 @@ class TelegramCommandHandler:
         """Handle /buy up [timeframe] or /buy down [timeframe]"""
         if not args:
             self.notifier.send(
-                "🛒 <b>BUY</b>\n\n"
-                "Usage:\n"
-                "/buy up — Buy UP (BTC will rise)\n"
-                "/buy down — Buy DOWN (BTC will fall)\n"
-                "/buy up 5m — Buy UP on 5-min market\n"
-                "/buy down 1h — Buy DOWN on 1-hour market"
+                "🛒 <b>BUY — BTC Markets</b>\n\n"
+                "<b>BTC UP/DOWN:</b>\n"
+                "/buy up — BTC will go UP\n"
+                "/buy down — BTC will go DOWN\n"
+                "/buy up 5m — 5-minute market\n"
+                "/buy down 1h — 1-hour market\n\n"
+                "<b>Custom Markets:</b>\n"
+                "/search trump — Find any market\n"
+                "/trending — See popular markets\n"
+                "/trade 1 yes — Buy from search results"
             )
             return
 
@@ -372,12 +380,16 @@ class TelegramCommandHandler:
             return
 
         direction_str = args[0].lower()
-        if direction_str not in ("up", "down"):
-            self.notifier.send("❌ Use: /buy up or /buy down")
+        if direction_str not in ("up", "down", "yes", "no"):
+            self.notifier.send("❌ Use: /buy up or /buy down\nFor custom markets use /search + /trade")
             return
 
         from trade_manager import TradeDirection
-        direction = TradeDirection.UP if direction_str == "up" else TradeDirection.DOWN
+        # Map yes/no to up/down
+        if direction_str in ("up", "yes"):
+            direction = TradeDirection.UP
+        else:
+            direction = TradeDirection.DOWN
 
         # Optional timeframe
         timeframe = args[1] if len(args) > 1 else None
@@ -439,6 +451,150 @@ class TelegramCommandHandler:
             self.notifier.send(msg)
         else:
             self.notifier.send("❌ Use: /auto up, /auto down, or /auto off")
+
+    # ── Custom Market Commands ────────────────────────
+
+    def _cmd_search(self, args):
+        """Handle /search <query>"""
+        if not args:
+            self.notifier.send(
+                "🔍 <b>SEARCH MARKETS</b>\n\n"
+                "Usage:\n"
+                "/search bitcoin — BTC markets\n"
+                "/search trump — Trump markets\n"
+                "/search election — Election markets\n"
+                "/search ethereum — ETH markets\n\n"
+                "Then use /trade <#> <outcome> to buy!"
+            )
+            return
+
+        if not self.market_finder:
+            self.notifier.send("⚠️ Market finder not initialized.")
+            return
+
+        query = " ".join(args)
+        self.notifier.send(f"🔍 Searching for '{query}'...")
+
+        results = self.market_finder.search_markets(query, limit=8)
+        if not results:
+            self.notifier.send(f"❌ No active markets found for '{query}'")
+            return
+
+        self._search_results = results
+        lines = [f"🔍 <b>SEARCH: '{query}'</b>\n"]
+        for i, event in enumerate(results, 1):
+            outcomes_text = event.outcome_summary
+            liq_text = f"${event.liquidity:,.0f}" if event.liquidity > 0 else "N/A"
+            lines.append(
+                f"<b>{i}.</b> {event.question[:55]}\n"
+                f"   {outcomes_text}\n"
+                f"   💧 Liquidity: {liq_text}\n"
+            )
+        lines.append("\n<b>To trade:</b> /trade <i>#</i> <i>outcome</i>")
+        lines.append("Example: /trade 1 yes")
+        self.notifier.send("\n".join(lines))
+
+    def _cmd_trending(self, args):
+        """Handle /trending"""
+        if not self.market_finder:
+            self.notifier.send("⚠️ Market finder not initialized.")
+            return
+
+        self.notifier.send("📈 Fetching trending markets...")
+
+        results = self.market_finder.get_trending_markets(limit=8)
+        if not results:
+            self.notifier.send("❌ Could not fetch trending markets.")
+            return
+
+        self._search_results = results
+        lines = ["📈 <b>TRENDING MARKETS</b>\n"]
+        for i, event in enumerate(results, 1):
+            outcomes_text = event.outcome_summary
+            liq_text = f"${event.liquidity:,.0f}" if event.liquidity > 0 else "N/A"
+            lines.append(
+                f"<b>{i}.</b> {event.question[:55]}\n"
+                f"   {outcomes_text}\n"
+                f"   💧 Liquidity: {liq_text}\n"
+            )
+        lines.append("\n<b>To trade:</b> /trade <i>#</i> <i>outcome</i>")
+        lines.append("Example: /trade 1 yes")
+        self.notifier.send("\n".join(lines))
+
+    def _cmd_trade(self, args):
+        """Handle /trade <number> <outcome>"""
+        if not args or len(args) < 2:
+            self.notifier.send(
+                "📋 <b>TRADE CUSTOM MARKET</b>\n\n"
+                "Usage:\n"
+                "/trade 1 yes — Buy 'Yes' on result #1\n"
+                "/trade 1 no — Buy 'No' on result #1\n"
+                "/trade 3 1 — Buy outcome #1 of result #3\n\n"
+                "First use /search or /trending to see markets."
+            )
+            return
+
+        if not self.engine:
+            self.notifier.send("⚠️ Engine not initialized yet.")
+            return
+
+        if not self._search_results:
+            self.notifier.send("⚠️ No search results. Use /search or /trending first.")
+            return
+
+        try:
+            index = int(args[0]) - 1
+        except ValueError:
+            self.notifier.send("❌ First argument must be a number (e.g., /trade 1 yes)")
+            return
+
+        if index < 0 or index >= len(self._search_results):
+            self.notifier.send(f"❌ Invalid #. Choose 1-{len(self._search_results)}")
+            return
+
+        event = self._search_results[index]
+
+        # Refresh prices
+        event = self.market_finder.refresh_event_prices(event)
+
+        # Determine outcome
+        outcome_str = args[1].lower()
+        outcome_index = None
+
+        # Try matching by name
+        for i, outcome in enumerate(event.outcomes):
+            if outcome.lower() == outcome_str:
+                outcome_index = i
+                break
+
+        # Try matching yes/no
+        if outcome_index is None:
+            if outcome_str in ("yes", "up", "1", "first"):
+                outcome_index = 0
+            elif outcome_str in ("no", "down", "2", "second"):
+                outcome_index = 1
+            else:
+                try:
+                    outcome_index = int(outcome_str) - 1
+                except ValueError:
+                    pass
+
+        if outcome_index is None or outcome_index < 0 or outcome_index >= len(event.outcomes):
+            outcomes_list = ", ".join(f"'{o}'" for o in event.outcomes)
+            self.notifier.send(f"❌ Invalid outcome: {outcome_str}\nAvailable: {outcomes_list}")
+            return
+
+        # Confirm and trade
+        outcome_name = event.outcomes[outcome_index]
+        price = event.get_price_for_outcome(outcome_index)
+        self.notifier.send(
+            f"📋 Trading: <b>{outcome_name}</b> @ ${price:.3f}\n"
+            f"Market: {event.question[:60]}\n\n"
+            f"Placing order..."
+        )
+
+        success, msg = self.engine.manual_buy_custom(event, outcome_index)
+        self.notifier.send(msg)
 
     # ── Status Commands ──────────────────────────────
 
@@ -635,38 +791,48 @@ class TelegramCommandHandler:
 
     def _cmd_help(self, args):
         msg = (
-            "🤖 <b>POLYMARKET BOT COMMANDS</b>\n\n"
-            "<b>🛒 Trading:</b>\n"
-            "/buy up — Buy UP tokens\n"
-            "/buy down — Buy DOWN tokens\n"
-            "/buy up 5m — Buy UP on 5-min market\n"
-            "/sell — Sell current position\n\n"
-            "<b>🔄 Auto-Repeat:</b>\n"
-            "/auto up — Auto re-buy UP each market\n"
-            "/auto down — Auto re-buy DOWN each market\n"
-            "/auto off — Stop auto-repeat\n\n"
-            "<b>📊 Status:</b>\n"
-            "/status — Bot + positions + P&L\n"
+            "🤖 <b>POLYMARKET BOT — ALL COMMANDS</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>🛒 BTC TRADING:</b>\n"
+            "/buy up — BTC will go UP\n"
+            "/buy down — BTC will go DOWN\n"
+            "/buy up 5m — 5-minute market\n"
+            "/buy down 1h — 1-hour market\n"
+            "/sell — Close current position\n\n"
+            "<b>🌍 CUSTOM MARKETS:</b>\n"
+            "/search <i>query</i> — Find any market\n"
+            "  e.g. /search trump\n"
+            "  e.g. /search ethereum\n"
+            "/trending — Popular markets\n"
+            "/trade <i># outcome</i> — Buy from results\n"
+            "  e.g. /trade 1 yes\n"
+            "  e.g. /trade 3 no\n\n"
+            "<b>🔄 AUTO-REPEAT:</b>\n"
+            "/auto up — Keep buying UP\n"
+            "/auto down — Keep buying DOWN\n"
+            "/auto off — Stop auto\n\n"
+            "<b>📊 STATUS & INFO:</b>\n"
+            "/status — Positions + P&L\n"
             "/config — All settings\n"
-            "/pnl — P&L summary\n"
-            "/trades — Recent trades\n"
-            "/markets — Available markets\n"
-            "/balance — Wallet balance\n\n"
-            "<b>⚙️ Settings (ALL changeable):</b>\n"
-            "/set tp <i>value</i> — Take-profit %\n"
-            "/set sl <i>value</i> — Stop-loss %\n"
-            "/set amount <i>value</i> — Stake ($)\n"
-            "/set percent <i>value</i> — Portfolio %\n"
+            "/pnl — Profit/Loss summary\n"
+            "/trades — Recent trade history\n"
+            "/markets — BTC markets list\n"
+            "/balance — Wallet USDC + MATIC\n\n"
+            "<b>⚙️ SETTINGS (all live!):</b>\n"
+            "/set tp <i>90</i> — Take-profit %\n"
+            "/set sl <i>30</i> — Stop-loss %\n"
+            "/set amount <i>10</i> — Stake $\n"
+            "/set percent <i>5</i> — Portfolio %\n"
             "/set size <i>fixed/percent</i>\n"
-            "/set slippage <i>value</i> — Max slippage\n"
-            "/set shareprice <i>value</i> — Price target\n"
-            "/set market <i>5m,15m,1h,1d</i>\n"
-            "/set maxtrades <i>value</i> — Daily limit\n"
-            "/set cooldown <i>value</i> — Cooldown min\n"
-            "/set tick <i>value</i> — Check interval\n\n"
-            "<b>🎮 Control:</b>\n"
-            "/start — Resume\n"
-            "/stop — Pause\n"
-            "/help — This message"
+            "/set slippage <i>0.05</i>\n"
+            "/set shareprice <i>0.50</i>\n"
+            "/set market <i>5m,15m,1h</i>\n"
+            "/set maxtrades <i>50</i>\n"
+            "/set cooldown <i>30</i>\n"
+            "/set tick <i>5</i>\n\n"
+            "<b>🎮 CONTROL:</b>\n"
+            "/start — Resume bot\n"
+            "/stop — Pause bot\n"
+            "/help — This guide"
         )
         self.notifier.send(msg)
