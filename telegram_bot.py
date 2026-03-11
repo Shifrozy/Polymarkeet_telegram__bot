@@ -735,21 +735,34 @@ class TelegramCommandHandler:
             from web3 import Web3
             w3 = Web3(Web3.HTTPProvider("https://polygon-bor-rpc.publicnode.com"))
             wallet = Web3.to_checksum_address(FUNDER_ADDRESS)
-            usdc_abi = [{"constant": True, "inputs": [{"name": "", "type": "address"}],
+            erc20_abi = [{"constant": True, "inputs": [{"name": "", "type": "address"}],
                 "name": "balanceOf", "outputs": [{"name": "", "type": "uint256"}],
                 "stateMutability": "view", "type": "function"}]
-            usdc = w3.eth.contract(
-                address=Web3.to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"),
-                abi=usdc_abi,
+
+            # Native USDC (Polymarket uses this)
+            usdc_native = w3.eth.contract(
+                address=Web3.to_checksum_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"),
+                abi=erc20_abi,
             )
-            usdc_bal = usdc.functions.balanceOf(wallet).call() / 1e6
+            usdc_native_bal = usdc_native.functions.balanceOf(wallet).call() / 1e6
+
+            # USDC.e (bridged, older)
+            usdc_bridged = w3.eth.contract(
+                address=Web3.to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"),
+                abi=erc20_abi,
+            )
+            usdc_bridged_bal = usdc_bridged.functions.balanceOf(wallet).call() / 1e6
+
             matic_bal = w3.eth.get_balance(wallet) / 1e18
             short_addr = f"{FUNDER_ADDRESS[:6]}...{FUNDER_ADDRESS[-4:]}"
+            total_usdc = usdc_native_bal + usdc_bridged_bal
             msg = (
                 f"💰 <b>WALLET BALANCE</b>\n\n"
                 f"Wallet: <code>{short_addr}</code>\n"
-                f"USDC.e: <b>${usdc_bal:.2f}</b>\n"
-                f"MATIC: {matic_bal:.4f} POL"
+                f"USDC: <b>${usdc_native_bal:.2f}</b>\n"
+                f"USDC.e: ${usdc_bridged_bal:.2f}\n"
+                f"Total: <b>${total_usdc:.2f}</b>\n"
+                f"POL: {matic_bal:.4f}"
             )
             self.notifier.send(msg)
         except Exception as e:
