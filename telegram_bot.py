@@ -359,6 +359,7 @@ class TelegramCommandHandler:
             "/buy": self._cmd_buy,
             "/sell": self._cmd_sell,
             "/auto": self._cmd_auto,
+            "/schedule": self._cmd_schedule,
             "/search": self._cmd_search,
             "/trending": self._cmd_trending,
             "/trade": self._cmd_trade,
@@ -478,6 +479,66 @@ class TelegramCommandHandler:
             self.notifier.send(msg)
         else:
             self.notifier.send("❌ Use: /auto up, /auto down, or /auto off")
+
+    def _cmd_schedule(self, args):
+        """Handle /schedule HH:MM up/down or /schedule off"""
+        if not args:
+            # Show current schedule if any
+            if self.engine and self.engine.state.scheduled_time:
+                st = self.engine.state
+                dir_text = st.scheduled_direction.value if st.scheduled_direction else "?"
+                self.notifier.send(
+                    f"⏰ <b>SCHEDULED TRADE</b>\n\n"
+                    f"Time: <b>{st.scheduled_time}</b>\n"
+                    f"Direction: {dir_text}\n"
+                    f"Market: {st.scheduled_timeframe or '?'}\n\n"
+                    f"Cancel with /schedule off"
+                )
+            else:
+                self.notifier.send(
+                    "⏰ <b>SCHEDULE A TRADE</b>\n\n"
+                    "Usage:\n"
+                    "/schedule 14:30 up — Buy UP at 14:30\n"
+                    "/schedule 2:24 down — Buy DOWN at 2:24\n"
+                    "/schedule 9:00 up 5m — Buy UP at 9:00 on 5m market\n"
+                    "/schedule off — Cancel scheduled trade\n\n"
+                    "Time is in your local timezone (24h format)."
+                )
+            return
+
+        if not self.engine:
+            self.notifier.send("⚠️ Engine not initialized yet.")
+            return
+
+        # Cancel
+        if args[0].lower() == "off":
+            msg = self.engine.cancel_schedule()
+            self.notifier.send(msg)
+            return
+
+        # Need at least time + direction
+        if len(args) < 2:
+            self.notifier.send("❌ Usage: /schedule HH:MM up/down\nExample: /schedule 14:30 up")
+            return
+
+        time_str = args[0]
+        direction_str = args[1].lower()
+
+        if direction_str not in ("up", "down"):
+            self.notifier.send("❌ Direction must be 'up' or 'down'")
+            return
+
+        from trade_manager import TradeDirection
+        direction = TradeDirection.UP if direction_str == "up" else TradeDirection.DOWN
+
+        # Optional timeframe
+        timeframe = args[2] if len(args) > 2 else None
+        if timeframe and timeframe not in ("5m", "15m", "1h", "1d"):
+            self.notifier.send(f"❌ Invalid timeframe: {timeframe}. Use: 5m, 15m, 1h, 1d")
+            return
+
+        success, msg = self.engine.schedule_trade(time_str, direction, timeframe)
+        self.notifier.send(msg)
 
     # ── Custom Market Commands ────────────────────────
 
@@ -828,12 +889,12 @@ class TelegramCommandHandler:
             "/sell — Close current position\n\n"
             "<b>🌍 CUSTOM MARKETS:</b>\n"
             "/search <i>query</i> — Find any market\n"
-            "  e.g. /search trump\n"
-            "  e.g. /search ethereum\n"
             "/trending — Popular markets\n"
-            "/trade <i># outcome</i> — Buy from results\n"
-            "  e.g. /trade 1 yes\n"
-            "  e.g. /trade 3 no\n\n"
+            "/trade <i># outcome</i> — Buy from results\n\n"
+            "<b>⏰ SCHEDULED:</b>\n"
+            "/schedule <i>HH:MM up/down</i> — Auto-trade at time\n"
+            "  e.g. /schedule 14:30 up\n"
+            "/schedule off — Cancel\n\n"
             "<b>🔄 AUTO-REPEAT:</b>\n"
             "/auto up — Keep buying UP\n"
             "/auto down — Keep buying DOWN\n"
@@ -849,14 +910,8 @@ class TelegramCommandHandler:
             "/set tp <i>90</i> — Take-profit %\n"
             "/set sl <i>30</i> — Stop-loss %\n"
             "/set amount <i>10</i> — Stake $\n"
-            "/set percent <i>5</i> — Portfolio %\n"
-            "/set size <i>fixed/percent</i>\n"
             "/set slippage <i>0.05</i>\n"
-            "/set shareprice <i>0.50</i>\n"
-            "/set market <i>5m,15m,1h</i>\n"
-            "/set maxtrades <i>50</i>\n"
-            "/set cooldown <i>30</i>\n"
-            "/set tick <i>5</i>\n\n"
+            "/set market <i>5m,15m,1h</i>\n\n"
             "<b>🎮 CONTROL:</b>\n"
             "/start — Resume bot\n"
             "/stop — Pause bot\n"

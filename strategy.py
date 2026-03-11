@@ -51,6 +51,9 @@ class StrategyState:
     waiting_market_since: float = 0.0
     total_buys: int = 0
     total_sells: int = 0
+    scheduled_time: Optional[str] = None          # e.g. "14:30"
+    scheduled_direction: Optional[TradeDirection] = None
+    scheduled_timeframe: Optional[str] = None
 
 
 class StrategyEngine:
@@ -104,13 +107,16 @@ class StrategyEngine:
         except Exception:
             pass
 
-        # 2. Monitor TP/SL if we have an open trade
+        # 2. Check scheduled trades
+        self._check_scheduled_trade()
+
+        # 3. Monitor TP/SL if we have an open trade
         if self.trader.has_open_trade():
             self.state.bot_state = BotState.IN_TRADE
             self._monitor_tp_sl()
             self._check_market_resolution()
 
-        # 3. Auto-repeat: waiting for next market
+        # 4. Auto-repeat: waiting for next market
         elif self.state.auto_repeat_active and self.state.bot_state == BotState.WAITING_MARKET:
             self._handle_auto_repeat()
 
@@ -307,6 +313,88 @@ class StrategyEngine:
             f"P&L: <b>{pnl_sign}${trade.pnl:.2f}</b>\n"
             f"{'✅ Sell order filled' if sold else '⚠️ Sell order may have failed'}"
         )
+
+    # ── Scheduled Trading ─────────────────────────────
+
+    def schedule_trade(self, time_str: str, direction: TradeDirection, timeframe: str = None) -> tuple[bool, str]:
+        """
+        Schedule a trade at a specific time (HH:MM format).
+        Returns (success, message).
+        """
+        # Validate time format
+        try:
+            parts = time_str.split(":")
+            hour = int(parts[0])
+            minute = int(parts[1])
+            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                return False, "Invalid time. Use HH:MM format (e.g., 14:30)"
+        except (ValueError, IndexError):
+            return False, "Invalid time format. Use HH:MM (e.g., 14:30 or 2:24)"
+
+        formatted_time = f"{hour:02d}:{minute:02d}"
+        tf = timeframe or trading_config.market_timeframes[0]
+        dir_text = "UP" if direction == TradeDirection.UP else "DOWN"
+
+        self.state.scheduled_time = formatted_time
+        self.state.scheduled_direction = direction
+        self.state.scheduled_timeframe = tf
+
+        self._log(f"Scheduled: BUY {dir_text} at {formatted_time} on {tf} market")
+
+        return True, (
+            f"⏰ <b>TRADE SCHEDULED</b>\n\n"
+            f"Time: <b>{formatted_time}</b>\n"
+            f"Direction: {'UP 🟢' if direction == TradeDirection.UP else 'DOWN 🔴'}\n"
+            f"Market: {tf}\n\n"
+            f"Bot will auto-buy at {formatted_time}.\n"
+            f"Cancel with /schedule off"
+        )
+
+    def cancel_schedule(self) -> str:
+        """Cancel any scheduled trade."""
+        if self.state.scheduled_time:
+            old_time = self.state.scheduled_time
+            self.state.scheduled_time = None
+            self.state.scheduled_direction = None
+            self.state.scheduled_timeframe = None
+            self._log(f"Cancelled scheduled trade at {old_time}")
+            return f"Scheduled trade at {old_time} cancelled."
+        return "No trade scheduled."
+
+    def _check_scheduled_trade(self):
+        """Check if a scheduled trade time has arrived."""
+        if not self.state.scheduled_time or not self.state.scheduled_direction:
+            return
+
+        # Don't execute if already in a trade
+        if self.trader.has_open_trade():
+            return
+
+        now = datetime.now()
+        current_time = f"{now.hour:02d}:{now.minute:02d}"
+
+        if current_time == self.state.scheduled_time:
+            direction = self.state.scheduled_direction
+            tf = self.state.scheduled_timeframe
+            dir_text = "UP" if direction == TradeDirection.UP else "DOWN"
+
+            self._log(f"⏰ Scheduled time {self.state.scheduled_time} reached! Placing {dir_text} trade...")
+
+            # Clear schedule before executing (prevent double execution)
+            self.state.scheduled_time = None
+            self.state.scheduled_direction = None
+            self.state.scheduled_timeframe = None
+
+            success, msg = self.manual_buy(direction, tf)
+
+            if success:
+                self._log(f"Scheduled trade placed successfully!")
+                if self.telegram:
+                    self.telegram.send(f"⏰ <b>SCHEDULED TRADE EXECUTED</b>\n\n{msg}")
+            else:
+                self._log(f"Scheduled trade failed: {msg}")
+                if self.telegram:
+                    self.telegram.send(f"⏰ Scheduled trade FAILED:\n{msg}")
 
     # ── Auto-Repeat Logic ────────────────────────────
 
