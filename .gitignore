@@ -26,4 +26,5 @@ Thumbs.db
 
 # ── Data ─────────────────────────────────
 trade_history.json
+trade_log.xlsx
 *.log

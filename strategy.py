@@ -79,6 +79,11 @@ class StrategyEngine:
         self._log = on_log or (lambda msg: None)
         self._current_market: Optional[BTCMarket] = None
 
+        # Excel trade logger
+        from trade_logger import TradeLogger
+        self.logger = TradeLogger()
+        self.logger.log_event("BOT_START", "Strategy engine initialized")
+
     # ── Main Tick ────────────────────────────────────
 
     def process_tick(self):
@@ -183,6 +188,8 @@ class StrategyEngine:
 
             # Telegram notification is sent by the command handler
             # (not here, to avoid double messages)
+            dir_str = direction.value
+            self.logger.log_event("BUY", f"{dir_str} | ${trade.amount:.2f} | {trade.shares:.1f} shares @ ${trade.share_price:.4f} | {tf}")
 
             dir_text = "UP 🟢" if direction == TradeDirection.UP else "DOWN 🔴"
             return True, (
@@ -302,6 +309,9 @@ class StrategyEngine:
         )
 
         # Telegram notification is sent by the command handler
+
+        self.logger.log_trade(trade)
+        self.logger.log_event("MANUAL_SELL", f"P&L: {pnl_sign}${trade.pnl:.2f} | {'Sold' if sold else 'Failed'}")
 
         self.state.bot_state = BotState.IDLE
 
@@ -490,6 +500,9 @@ class StrategyEngine:
             if self.telegram:
                 self.telegram.send_trade_closed(trade)
 
+            self.logger.log_trade(trade)
+            self.logger.log_event("TAKE_PROFIT", f"TP hit @ {live_price:.4f} | P&L: ${trade.pnl:+.2f}")
+
             self._after_trade_close()
 
         elif result == "SL":
@@ -507,6 +520,9 @@ class StrategyEngine:
 
             if self.telegram:
                 self.telegram.send_trade_closed(trade)
+
+            self.logger.log_trade(trade)
+            self.logger.log_event("STOP_LOSS", f"SL hit @ {live_price:.4f} | P&L: ${trade.pnl:+.2f}")
 
             self._after_trade_close()
 
@@ -537,6 +553,9 @@ class StrategyEngine:
 
             if self.telegram:
                 self.telegram.send_trade_closed(trade)
+
+            self.logger.log_trade(trade)
+            self.logger.log_event("MARKET_RESOLVED", f"{trade.close_reason} | P&L: ${trade.pnl:+.2f}")
 
             self._after_trade_close()
 
