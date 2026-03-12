@@ -371,6 +371,7 @@ class TelegramCommandHandler:
             "/pnl": self._cmd_pnl,
             "/trades": self._cmd_trades,
             "/history": self._cmd_history,
+            "/backtest": self._cmd_backtest,
             "/markets": self._cmd_markets,
             "/balance": self._cmd_balance,
             "/help": self._cmd_help,
@@ -780,6 +781,121 @@ class TelegramCommandHandler:
 
         self.notifier.send(msg)
 
+    def _cmd_backtest(self, args):
+        """Handle /backtest — run a quick simulation and save to backtest_log.xlsx."""
+        if not args:
+            self.notifier.send(
+                "🧪 <b>BACKTEST</b>\n\n"
+                "Usage:\n"
+                "/backtest run — Run backtest with live trade history\n"
+                "/backtest results — Show last backtest results\n\n"
+                "Results saved to <b>backtest_log.xlsx</b>\n"
+                "Sheets: Trades, Events, Summary, Daily"
+            )
+            return
+
+        action = args[0].lower()
+
+        if action == "results":
+            # Show last backtest results
+            import os
+            bt_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest_log.xlsx")
+            if not os.path.exists(bt_file):
+                self.notifier.send("❌ No backtest data found. Run /backtest run first.")
+                return
+            try:
+                from backtest_logger import BacktestLogger
+                bt = BacktestLogger.__new__(BacktestLogger)
+                bt.file_path = bt_file
+                bt._lock = __import__('threading').Lock()
+                bt._starting_balance = 100
+                bt._balance = 100
+                bt._daily_data = {}
+                bt._trade_count = 0
+
+                from openpyxl import load_workbook
+                wb = load_workbook(bt_file, read_only=True)
+                ws = wb["Summary"]
+                lines = ["📊 <b>LAST BACKTEST RESULTS</b>\n━━━━━━━━━━━━━━━━━━━━━━━\n"]
+                for row in ws.iter_rows(min_row=2, max_col=2, values_only=True):
+                    if row[0]:
+                        lines.append(f"{row[0]}: <b>{row[1]}</b>")
+                wb.close()
+                self.notifier.send("\n".join(lines))
+            except Exception as e:
+                self.notifier.send(f"⚠️ Error reading backtest: {str(e)[:200]}")
+            return
+
+        if action == "run":
+            if not self.engine:
+                self.notifier.send("⚠️ Engine not initialized yet.")
+                return
+
+            self.notifier.send("🧪 Running backtest with your trade history...\nThis may take a moment...")
+
+            import threading
+            threading.Thread(target=self._run_backtest, daemon=True).start()
+            return
+
+        self.notifier.send("❌ Unknown. Use: /backtest run or /backtest results")
+
+    def _run_backtest(self):
+        """Run backtest in background thread."""
+        try:
+            from backtest_logger import BacktestLogger
+            from openpyxl import load_workbook
+            import os
+
+            # Read live trade log
+            live_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_log.xlsx")
+            if not os.path.exists(live_file):
+                self.notifier.send("❌ No trade history found. Trade first, then backtest.")
+                return
+
+            wb = load_workbook(live_file, read_only=True)
+            ws = wb["Trades"]
+
+            trades = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0] is None:
+                    continue
+                trades.append({
+                    "direction": row[3] or "UP",
+                    "market": row[4] or "",
+                    "timeframe": row[5] or "15m",
+                    "entry_price": float(row[6]) if row[6] else 0.50,
+                    "exit_price": float(row[7]) if row[7] else 0.50,
+                    "shares": float(row[8]) if row[8] else 10,
+                    "stake": float(row[9]) if row[9] else 5,
+                    "pnl": float(row[10]) if row[10] else 0,
+                    "close_reason": row[12] or "Unknown",
+                    "duration": float(row[14]) if row[14] else 0,
+                    "date": str(row[1]) if row[1] else "",
+                    "time": str(row[2]) if row[2] else "",
+                })
+            wb.close()
+
+            if not trades:
+                self.notifier.send("❌ No trades in history. Make some trades first!")
+                return
+
+            # Calculate starting balance from config
+            from config import trading_config
+            starting_bal = trading_config.trade_amount * 20  # Assume 20x trade size as starting
+
+            # Create backtest log
+            bt = BacktestLogger(starting_balance=starting_bal)
+
+            for t in trades:
+                bt.log_trade(t)
+
+            result = bt.finalize()
+            msg = bt.get_summary_text()
+            self.notifier.send(msg)
+
+        except Exception as e:
+            self.notifier.send(f"⚠️ Backtest error: {str(e)[:300]}")
+
     def _cmd_markets(self, args):
         if not self.market_finder:
             self.notifier.send("⚠️ Market finder not initialized.")
@@ -995,6 +1111,8 @@ class TelegramCommandHandler:
             "/trades — Recent trade history\n"
             "/history <i>period</i> — Trade history by period\n"
             "  e.g. /history 1y, /history 2024\n"
+            "/backtest run — Run backtest simulation\n"
+            "/backtest results — Last backtest summary\n"
             "/markets — BTC markets list\n"
             "/balance — Wallet USDC + MATIC\n\n"
             "<b>⚙️ SETTINGS (all live!):</b>\n"

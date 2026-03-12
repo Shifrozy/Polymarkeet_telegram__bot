@@ -27,4 +27,5 @@ Thumbs.db
 # ── Data ─────────────────────────────────
 trade_history.json
 trade_log.xlsx
+backtest_log.xlsx
 *.log
