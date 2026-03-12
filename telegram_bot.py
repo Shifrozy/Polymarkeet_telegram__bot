@@ -86,6 +86,24 @@ class TelegramNotifier:
             print(f"Telegram send error: {e}")
             return False
 
+    def send_document(self, file_path: str, caption: str = "") -> bool:
+        """Send a document/file to Telegram."""
+        import os
+        if not self._enabled or not os.path.exists(file_path):
+            return False
+        try:
+            with open(file_path, "rb") as f:
+                resp = requests.post(
+                    f"{self.base_url}/sendDocument",
+                    data={"chat_id": self.chat_id, "caption": caption},
+                    files={"document": f},
+                    timeout=30,
+                )
+            return resp.status_code == 200
+        except Exception as e:
+            print(f"Telegram send document error: {e}")
+            return False
+
     def send_trade_opened(self, trade) -> bool:
         direction = "🟢 LONG (UP)" if trade.direction.value == "UP" else "🔴 SHORT (DOWN)"
         msg = (
@@ -372,6 +390,7 @@ class TelegramCommandHandler:
             "/trades": self._cmd_trades,
             "/history": self._cmd_history,
             "/backtest": self._cmd_backtest,
+            "/export": self._cmd_export,
             "/markets": self._cmd_markets,
             "/balance": self._cmd_balance,
             "/help": self._cmd_help,
@@ -896,6 +915,38 @@ class TelegramCommandHandler:
         except Exception as e:
             self.notifier.send(f"⚠️ Backtest error: {str(e)[:300]}")
 
+    def _cmd_export(self, args):
+        """Handle /export [live/backtest]"""
+        if not args:
+            self.notifier.send(
+                "📁 <b>EXPORT LOGS</b>\n\n"
+                "Usage:\n"
+                "/export live — Send trade_log.xlsx\n"
+                "/export backtest — Send backtest_log.xlsx"
+            )
+            return
+
+        import os
+        target = args[0].lower()
+        if target == "live":
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_log.xlsx")
+            label = "Live Trade Log"
+        elif target == "backtest":
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest_log.xlsx")
+            label = "Backtest Log"
+        else:
+            self.notifier.send("❌ Unknown target. Use: /export live or /export backtest")
+            return
+
+        if not os.path.exists(path):
+            self.notifier.send(f"❌ File not found: {label}")
+            return
+
+        self.notifier.send(f"📤 Uploading {label}...")
+        success = self.notifier.send_document(path, f"📊 {label} (Generated at {datetime.now().strftime('%Y-%m-%d %H:%M')})")
+        if not success:
+            self.notifier.send("❌ Failed to send file.")
+
     def _cmd_markets(self, args):
         if not self.market_finder:
             self.notifier.send("⚠️ Market finder not initialized.")
@@ -1113,6 +1164,8 @@ class TelegramCommandHandler:
             "  e.g. /history 1y, /history 2024\n"
             "/backtest run — Run backtest simulation\n"
             "/backtest results — Last backtest summary\n"
+            "/export live — Download Live Excel log\n"
+            "/export backtest — Download Backtest Excel log\n"
             "/markets — BTC markets list\n"
             "/balance — Wallet USDC + MATIC\n\n"
             "<b>⚙️ SETTINGS (all live!):</b>\n"
