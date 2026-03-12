@@ -263,3 +263,152 @@ class TradeLogger:
 
         except Exception:
             pass
+
+    def get_history(self, period: str = None) -> dict:
+        """
+        Get trade history filtered by period.
+        
+        period formats:
+            None / "all"    → all time
+            "2024"          → year 2024
+            "2024-03"       → March 2024
+            "today"         → today only
+            "1d" / "7d"     → last N days
+            "1w" / "2w"     → last N weeks
+            "1m" / "3m"     → last N months
+            "1y" / "2y"     → last N years
+        
+        Returns dict with: trades (list), stats (dict)
+        """
+        from datetime import datetime, timedelta
+
+        if not os.path.exists(self.file_path):
+            return {"trades": [], "stats": {}, "period_label": "No data"}
+
+        with self._lock:
+            try:
+                wb = load_workbook(self.file_path, read_only=True)
+                ws = wb["Trades"]
+
+                # Read all trades
+                all_trades = []
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if row[0] is None:
+                        continue
+                    all_trades.append({
+                        "num": row[0],
+                        "date": str(row[1]) if row[1] else "",
+                        "time": str(row[2]) if row[2] else "",
+                        "direction": row[3] or "",
+                        "market": row[4] or "",
+                        "timeframe": row[5] or "",
+                        "entry_price": row[6] or 0,
+                        "exit_price": row[7] or 0,
+                        "shares": row[8] or 0,
+                        "stake": row[9] or 0,
+                        "pnl": row[10] or 0,
+                        "pnl_pct": row[11] or "0%",
+                        "close_reason": row[12] or "",
+                        "order_id": row[13] or "",
+                        "duration": row[14] or 0,
+                    })
+                wb.close()
+
+                # Determine date filter
+                now = datetime.now()
+                start_date = None
+                period_label = "All Time"
+
+                if period and period.lower() != "all":
+                    p = period.lower().strip()
+
+                    if p == "today":
+                        start_date = now.replace(hour=0, minute=0, second=0)
+                        period_label = f"Today ({now.strftime('%Y-%m-%d')})"
+
+                    elif p.endswith("d") and p[:-1].isdigit():
+                        days = int(p[:-1])
+                        start_date = now - timedelta(days=days)
+                        period_label = f"Last {days} day(s)"
+
+                    elif p.endswith("w") and p[:-1].isdigit():
+                        weeks = int(p[:-1])
+                        start_date = now - timedelta(weeks=weeks)
+                        period_label = f"Last {weeks} week(s)"
+
+                    elif p.endswith("m") and p[:-1].isdigit():
+                        months = int(p[:-1])
+                        start_date = now - timedelta(days=months * 30)
+                        period_label = f"Last {months} month(s)"
+
+                    elif p.endswith("y") and p[:-1].isdigit():
+                        years = int(p[:-1])
+                        start_date = now - timedelta(days=years * 365)
+                        period_label = f"Last {years} year(s)"
+
+                    elif len(p) == 4 and p.isdigit():
+                        # Year only: "2024"
+                        year = int(p)
+                        period_label = f"Year {year}"
+                        # Filter by year string match
+                        all_trades = [t for t in all_trades if t["date"].startswith(p)]
+                        start_date = None  # Already filtered
+
+                    elif len(p) == 7 and p[4] == "-":
+                        # Year-month: "2024-03"
+                        period_label = f"Month {p}"
+                        all_trades = [t for t in all_trades if t["date"].startswith(p)]
+                        start_date = None
+
+                # Apply date filter if start_date is set
+                if start_date:
+                    start_str = start_date.strftime("%Y-%m-%d")
+                    all_trades = [t for t in all_trades if t["date"] >= start_str]
+
+                # Calculate stats
+                pnls = []
+                volumes = []
+                for t in all_trades:
+                    try:
+                        pnl = float(t["pnl"])
+                        pnls.append(pnl)
+                    except (ValueError, TypeError):
+                        pass
+                    try:
+                        volumes.append(float(t["stake"]))
+                    except (ValueError, TypeError):
+                        pass
+
+                total = len(pnls)
+                wins = sum(1 for p in pnls if p >= 0)
+                losses = sum(1 for p in pnls if p < 0)
+                win_rate = (wins / total * 100) if total > 0 else 0
+                total_pnl = sum(pnls)
+                best = max(pnls) if pnls else 0
+                worst = min(pnls) if pnls else 0
+                avg_pnl = total_pnl / total if total > 0 else 0
+                total_vol = sum(volumes)
+
+                stats = {
+                    "total": total,
+                    "wins": wins,
+                    "losses": losses,
+                    "win_rate": win_rate,
+                    "total_pnl": total_pnl,
+                    "best": best,
+                    "worst": worst,
+                    "avg_pnl": avg_pnl,
+                    "total_volume": total_vol,
+                    "first_date": all_trades[0]["date"] if all_trades else "N/A",
+                    "last_date": all_trades[-1]["date"] if all_trades else "N/A",
+                }
+
+                return {
+                    "trades": all_trades,
+                    "stats": stats,
+                    "period_label": period_label,
+                }
+
+            except Exception as e:
+                return {"trades": [], "stats": {}, "period_label": f"Error: {str(e)[:100]}"}
+

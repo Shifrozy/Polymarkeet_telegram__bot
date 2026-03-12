@@ -370,6 +370,7 @@ class TelegramCommandHandler:
             "/stop": self._cmd_stop,
             "/pnl": self._cmd_pnl,
             "/trades": self._cmd_trades,
+            "/history": self._cmd_history,
             "/markets": self._cmd_markets,
             "/balance": self._cmd_balance,
             "/help": self._cmd_help,
@@ -708,6 +709,77 @@ class TelegramCommandHandler:
         else:
             self.notifier.send("⚠️ Trader not initialized yet.")
 
+    def _cmd_history(self, args):
+        """Handle /history [period] — show historical trade data."""
+        if not self.engine:
+            self.notifier.send("⚠️ Engine not initialized yet.")
+            return
+
+        period = args[0] if args else None
+
+        # Show usage if they just type /history
+        if not period:
+            self.notifier.send(
+                "📊 <b>TRADE HISTORY</b>\n\n"
+                "Usage:\n"
+                "/history all \u2014 All time\n"
+                "/history today \u2014 Today only\n"
+                "/history 7d \u2014 Last 7 days\n"
+                "/history 1m \u2014 Last 1 month\n"
+                "/history 3m \u2014 Last 3 months\n"
+                "/history 1y \u2014 Last 1 year\n"
+                "/history 2y \u2014 Last 2 years\n"
+                "/history 2024 \u2014 Year 2024\n"
+                "/history 2024-03 \u2014 March 2024"
+            )
+            return
+
+        data = self.engine.logger.get_history(period)
+        trades = data.get("trades", [])
+        stats = data.get("stats", {})
+        label = data.get("period_label", "Unknown")
+
+        if not stats or stats.get("total", 0) == 0:
+            self.notifier.send(f"📊 <b>{label}</b>\n\nNo trades found for this period.")
+            return
+
+        # Build summary
+        s = stats
+        pnl_sign = '+' if s['total_pnl'] >= 0 else ''
+        pnl_emoji = '🟢' if s['total_pnl'] >= 0 else '🔴'
+
+        msg = (
+            f"📊 <b>HISTORY: {label}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📈 <b>Summary:</b>\n"
+            f"Total Trades: <b>{s['total']}</b>\n"
+            f"Wins: {s['wins']} | Losses: {s['losses']}\n"
+            f"Win Rate: <b>{s['win_rate']:.1f}%</b>\n\n"
+            f"{pnl_emoji} <b>P&L:</b>\n"
+            f"Total: <b>{pnl_sign}${s['total_pnl']:.2f}</b>\n"
+            f"Avg per Trade: ${s['avg_pnl']:.2f}\n"
+            f"Best: +${s['best']:.2f}\n"
+            f"Worst: ${s['worst']:.2f}\n\n"
+            f"💰 Volume: ${s['total_volume']:.2f}\n"
+            f"📅 {s['first_date']} \u2192 {s['last_date']}"
+        )
+
+        # Show last 10 trades of the period
+        if trades:
+            recent = trades[-10:]
+            msg += "\n\n<b>Recent Trades:</b>\n"
+            for t in recent:
+                pnl_val = float(t['pnl']) if t['pnl'] else 0
+                icon = '✅' if pnl_val >= 0 else '❌'
+                sign = '+' if pnl_val >= 0 else ''
+                msg += (
+                    f"{icon} {t['date']} {t['time'][:5]} | "
+                    f"{t['direction']} | {sign}${pnl_val:.2f} | "
+                    f"{t['close_reason']}\n"
+                )
+
+        self.notifier.send(msg)
+
     def _cmd_markets(self, args):
         if not self.market_finder:
             self.notifier.send("⚠️ Market finder not initialized.")
@@ -921,6 +993,8 @@ class TelegramCommandHandler:
             "/config — All settings\n"
             "/pnl — Profit/Loss summary\n"
             "/trades — Recent trade history\n"
+            "/history <i>period</i> — Trade history by period\n"
+            "  e.g. /history 1y, /history 2024\n"
             "/markets — BTC markets list\n"
             "/balance — Wallet USDC + MATIC\n\n"
             "<b>⚙️ SETTINGS (all live!):</b>\n"
