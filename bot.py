@@ -25,6 +25,7 @@ import os
 import time
 import signal
 import argparse
+import atexit
 from datetime import datetime
 
 # Force UTF-8 for Windows terminal
@@ -47,12 +48,27 @@ from telegram_bot import TelegramNotifier, TelegramCommandHandler
 
 # ── Globals ─────────────────────────────────────────
 running = True
+_engine_ref = None  # Store engine reference for shutdown logging
+_stop_logged = False  # Prevent duplicate stop entries
+
+
+def _log_stop():
+    """Write BOT_STOP event to Excel (called on exit)."""
+    global _stop_logged
+    if _stop_logged or _engine_ref is None:
+        return
+    _stop_logged = True
+    try:
+        _engine_ref.logger._write_event("BOT_STOP", "Bot stopped")
+    except Exception:
+        pass
 
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C gracefully."""
     global running
     running = False
+    _log_stop()  # Write stop event immediately on Ctrl+C
 
 
 def log(msg: str):
@@ -134,6 +150,7 @@ def run_bot():
     finder = MarketFinder()
 
     # Create strategy engine with console logging
+    global _engine_ref
     engine = StrategyEngine(
         candle_feed=feed,
         trade_manager=trader,
@@ -141,6 +158,8 @@ def run_bot():
         telegram=telegram,
         on_log=log,
     )
+    _engine_ref = engine
+    atexit.register(_log_stop)  # Safety net: also log on process exit
 
     # Start Telegram command handler
     cmd_handler = TelegramCommandHandler(
@@ -237,11 +256,7 @@ def run_bot():
     # Shutdown
     cmd_handler.stop()
     telegram.send_bot_stopped()
-    
-    try:
-        engine.logger.log_event("BOT_STOP", "Bot stopped by user via Ctrl+C")
-    except Exception:
-        pass
+    _log_stop()  # Write BOT_STOP to Excel
 
     print()
     log("🛑 Bot stopped by user.")
