@@ -237,6 +237,11 @@ def run_bot():
     # Shutdown
     cmd_handler.stop()
     telegram.send_bot_stopped()
+    
+    try:
+        engine.logger.log_event("BOT_STOP", "Bot stopped by user via Ctrl+C")
+    except Exception:
+        pass
 
     print()
     log("🛑 Bot stopped by user.")

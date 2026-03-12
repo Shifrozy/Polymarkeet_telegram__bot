@@ -884,10 +884,14 @@ class TelegramCommandHandler:
 
     def _cmd_start(self, args):
         trading_config.update(bot_running=True)
+        if self.engine:
+            self.engine.logger.log_event("BOT_RESUME", "Bot resumed by user command")
         self.notifier.send("▶️ <b>Bot RESUMED</b>\nReady for /buy commands.")
 
     def _cmd_stop(self, args):
         trading_config.update(bot_running=False)
+        if self.engine:
+            self.engine.logger.log_event("BOT_PAUSE", "Bot paused by user command")
         self.notifier.send("⏸️ <b>Bot PAUSED</b>\nUse /start to resume.")
 
     def _cmd_help(self, args):

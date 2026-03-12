@@ -167,10 +167,7 @@ def validate_config() -> list[str]:
             errors.append("PRIVATE_KEY is not set in .env")
         if not FUNDER_ADDRESS or FUNDER_ADDRESS == "0x_your_wallet_address_here":
             errors.append("FUNDER_ADDRESS is not set in .env")
-    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "your_telegram_bot_token_here":
-        errors.append("TELEGRAM_BOT_TOKEN is not set in .env")
-    if not TELEGRAM_CHAT_ID or TELEGRAM_CHAT_ID == "your_chat_id_here":
-        errors.append("TELEGRAM_CHAT_ID is not set in .env")
+    # Telegram is optional — bot works without it (no notifications)
     if trading_config.trade_amount <= 0:
         errors.append("TRADE_AMOUNT must be > 0")
     if not (0 < trading_config.share_price < 1):
