@@ -127,6 +127,7 @@ class TradeManager:
         self._redeem_manager = None
         self._trade_log_file = "trade_history.json"
         self._last_error = ""
+        self.loss_streak = 0  # Number of consecutive losses
         self._load_history()
 
     def _init_client(self):
@@ -203,7 +204,18 @@ class TradeManager:
             except Exception:
                 pass
             return cfg.trade_amount  # Fallback to fixed
-        return cfg.trade_amount
+        
+        # Calculate amount with Loss Multiplier (Martingale)
+        base_amount = cfg.trade_amount
+        if self.loss_streak > 0 and cfg.loss_multiplier > 0:
+            # Formula: Base * (1 + Multiplier/100)^Streak
+            # e.g. 5 * (1 + 100/100)^1 = 10
+            # e.g. 5 * (1 + 100/100)^2 = 20
+            multiplier_factor = 1 + (cfg.loss_multiplier / 100.0)
+            amount = base_amount * (multiplier_factor ** self.loss_streak)
+            return round(amount, 2)
+
+        return base_amount
 
     def place_trade(
         self,
@@ -316,6 +328,11 @@ class TradeManager:
 
         trade.close_reason = reason or ("WIN" if won else "LOSS")
 
+        if won:
+            self.loss_streak = 0
+        else:
+            self.loss_streak += 1
+
         if self.current_trade and self.current_trade.trade_id == trade.trade_id:
             self.current_trade = None
 
@@ -374,6 +391,11 @@ class TradeManager:
         trade.pnl = (exit_price - trade.share_price) * trade.shares
         trade.close_reason = f"TAKE_PROFIT{'|SOLD' if sold else '|SELL_FAILED'}"
 
+        if trade.pnl >= 0:
+            self.loss_streak = 0
+        else:
+            self.loss_streak += 1
+
         if self.current_trade and self.current_trade.trade_id == trade.trade_id:
             self.current_trade = None
 
@@ -389,6 +411,11 @@ class TradeManager:
         trade.result_price = exit_price
         trade.pnl = (exit_price - trade.share_price) * trade.shares
         trade.close_reason = f"STOP_LOSS{'|SOLD' if sold else '|SELL_FAILED'}"
+
+        if trade.pnl >= 0:
+            self.loss_streak = 0
+        else:
+            self.loss_streak += 1
 
         if self.current_trade and self.current_trade.trade_id == trade.trade_id:
             self.current_trade = None
@@ -536,6 +563,17 @@ class TradeManager:
                         close_reason=td.get("close_reason", ""),
                     )
                     self.trades.append(trade)
+                
+                # Recover loss streak from history
+                self.loss_streak = 0
+                closed_statuses = (TradeStatus.WON, TradeStatus.LOST, TradeStatus.TP_HIT, TradeStatus.SL_HIT)
+                # Check from newest to oldest
+                for t in reversed(self.trades):
+                    if t.status in closed_statuses:
+                        if t.pnl >= 0:
+                            break # Win found, streak over
+                        else:
+                            self.loss_streak += 1 # Loss found, increment streak
         except Exception:
             pass
 

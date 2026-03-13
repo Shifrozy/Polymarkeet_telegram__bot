@@ -412,6 +412,7 @@ class StrategyEngine:
         """Enable auto-repeat for a direction."""
         self.state.auto_repeat_active = True
         self.state.auto_repeat_direction = direction
+        trading_config.update(auto_repeat=True)
         dir_text = "UP 🟢" if direction == TradeDirection.UP else "DOWN 🔴"
         self._log(f"🔄 Auto-repeat ENABLED for {dir_text}")
         return f"🔄 Auto-repeat enabled: will keep buying {dir_text} on each new market"
@@ -420,6 +421,7 @@ class StrategyEngine:
         """Disable auto-repeat."""
         self.state.auto_repeat_active = False
         self.state.auto_repeat_direction = None
+        trading_config.update(auto_repeat=False)
         self._log("⏹️ Auto-repeat DISABLED")
         return "⏹️ Auto-repeat disabled"
 
@@ -548,8 +550,9 @@ class StrategyEngine:
                 self._log(f"🎉 MARKET WIN! Token worth ${live_price:.4f} → P&L: +${trade.pnl:.2f}")
             else:
                 # Lost or unknown
+                lp_val = live_price if live_price is not None else 0.0
                 self.trader.resolve_trade(trade, won=False, reason="MARKET_LOSS")
-                self._log(f"💔 MARKET LOSS! Token worth ${live_price:.4f if live_price else 0:.4f} → P&L: ${trade.pnl:.2f}")
+                self._log(f"💔 MARKET LOSS! Token worth ${lp_val:.4f} → P&L: ${trade.pnl:.2f}")
 
             if self.telegram:
                 self.telegram.send_trade_closed(trade)

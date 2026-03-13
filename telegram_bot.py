@@ -177,6 +177,9 @@ class TelegramNotifier:
         msg = (
             f"📊 <b>BOT STATUS</b>\n\n"
             f"Status: {status}{state_text}\n\n"
+            f"── Martingale Recovery ──\n"
+            f"Loss Streak: {trader.loss_streak}\n"
+            f"Next Stake: <b>${trader.get_trade_amount():.2f}</b>\n\n"
             f"── Open Position ──\n{open_trade_text}\n\n"
             f"── Today ──\n"
             f"Daily P&L: <b>${trader.daily_pnl:+.2f}</b>\n"
@@ -206,7 +209,8 @@ class TelegramNotifier:
             f"Take-Profit: {cfg.take_profit_pct:.1f}%\n"
             f"Stop-Loss: {cfg.stop_loss_pct:.1f}%\n"
             f"Share Price: ${cfg.share_price:.2f}\n"
-            f"Max Slippage: ${cfg.max_slippage:.3f}\n\n"
+            f"Max Slippage: ${cfg.max_slippage:.3f}\n"
+            f"Loss Multiplier: {cfg.loss_multiplier:.1f}% (Martingale)\n\n"
             f"── Markets ──\n"
             f"Timeframes: {', '.join(cfg.market_timeframes)}\n\n"
             f"── Auto-Repeat ──\n"
@@ -298,6 +302,8 @@ class TelegramCommandHandler:
             return
         # Flush any old pending updates before starting
         self._flush_old_updates()
+        # Register commands in Telegram menu
+        self._register_commands_menu()
         self._running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
@@ -1030,7 +1036,8 @@ class TelegramCommandHandler:
                 "<b>Limits:</b>\n"
                 "/set maxtrades 50 — Max trades/day\n"
                 "/set cooldown 30 — Cooldown minutes\n"
-                "/set tick 5 — Tick interval (sec)"
+                "/set tick 5 — Tick interval (sec)\n"
+                "/set multiplier 100 — Loss Recovery % (0=off, 100=double)"
             )
             self.notifier.send(msg)
             return
@@ -1107,6 +1114,12 @@ class TelegramCommandHandler:
                     self.notifier.send("❌ Must be >= 1")
                     return
                 changes = trading_config.update(tick_interval=val)
+            elif param == "multiplier":
+                val = float(value)
+                if val < 0:
+                    self.notifier.send("❌ Multiplier must be >= 0")
+                    return
+                changes = trading_config.update(loss_multiplier=val)
             else:
                 self.notifier.send(f"❌ Unknown parameter: {param}\nType /set for list.")
                 return
@@ -1172,7 +1185,9 @@ class TelegramCommandHandler:
             "/set tp <i>90</i> — Take-profit %\n"
             "/set sl <i>30</i> — Stop-loss %\n"
             "/set amount <i>10</i> — Stake $\n"
-            "/set slippage <i>0.05</i>\n"
+            "/set multiplier <i>100</i> — Recovery %\n"
+            "/set shareprice <i>0.50</i> — Target price\n"
+            "/set slippage <i>0.05</i> — Range ($)\n"
             "/set market <i>5m,15m,1h</i>\n\n"
             "<b>🎮 CONTROL:</b>\n"
             "/start — Resume bot\n"
@@ -1180,3 +1195,29 @@ class TelegramCommandHandler:
             "/help — This guide"
         )
         self.notifier.send(msg)
+
+    def _register_commands_menu(self):
+        """Register the bot commands to the Telegram menu button."""
+        if not self.notifier.is_enabled:
+            return
+        
+        commands = [
+            {"command": "status", "description": "📊 Check status, P&L and open trades"},
+            {"command": "buy", "description": "🛒 Buy UP/DOWN (e.g. /buy up 15m)"},
+            {"command": "sell", "description": "📤 Sell current open position"},
+            {"command": "config", "description": "⚙️ Show all bot parameters"},
+            {"command": "set", "description": "🔧 Update a setting (e.g. /set amount 10)"},
+            {"command": "auto", "description": "🔄 Toggle auto-repeat mode"},
+            {"command": "balance", "description": "💰 Check wallet USDC balance"},
+            {"command": "pnl", "description": "📈 View daily/total P&L summary"},
+            {"command": "history", "description": "🕒 View trade history by period"},
+            {"command": "markets", "description": "🏪 List available BTC markets"},
+            {"command": "help", "description": "❓ Show all available commands"},
+        ]
+        
+        try:
+            url = f"{self.notifier.base_url}/setMyCommands"
+            import requests
+            requests.post(url, json={"commands": commands}, timeout=10)
+        except Exception:
+            pass

@@ -76,6 +76,7 @@ class TradingConfig:
         # ── Auto-Repeat ─────────────────────────────
         self.auto_repeat: bool = os.getenv("AUTO_REPEAT", "false").lower() == "true"
         self.max_trades_per_day: int = int(os.getenv("MAX_TRADES_PER_DAY", "50"))
+        self.loss_multiplier: float = float(os.getenv("LOSS_MULTIPLIER", "0.0")) # % to increase after loss
 
         # ── Candle interval mapping ─────────────────
         self._interval_map = {
@@ -147,6 +148,7 @@ class TradingConfig:
                 "tick_interval": self.tick_interval,
                 "auto_repeat": self.auto_repeat,
                 "max_trades_per_day": self.max_trades_per_day,
+                "loss_multiplier": self.loss_multiplier,
                 "bot_running": self.bot_running,
             }
 
