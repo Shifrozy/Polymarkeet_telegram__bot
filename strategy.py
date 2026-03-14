@@ -153,7 +153,6 @@ class StrategyEngine:
 
         # Refresh prices
         market = self.market.refresh_market_prices(market)
-        self._current_market = market
 
         # Get token and price
         if direction == TradeDirection.UP:
@@ -173,6 +172,7 @@ class StrategyEngine:
         )
 
         if trade:
+            self._current_market = market
             self.state.bot_state = BotState.IN_TRADE
             self.state.last_direction = direction
             self.state.last_timeframe = tf
@@ -451,7 +451,10 @@ class StrategyEngine:
         if self._current_market and market.condition_id == self._current_market.condition_id:
             return  # Same market — still waiting
 
-        self._log(f"🔄 Auto-repeat: New market found! Placing {self.state.auto_repeat_direction.value} trade...")
+        # Only log 'New market found' if it's the first attempt on this condition ID
+        if not hasattr(self.state, '_last_attempted_market') or self.state._last_attempted_market != market.condition_id:
+            self._log(f"🔄 Auto-repeat: Target market found! Waiting for price range to place {self.state.auto_repeat_direction.value} trade...")
+            self.state._last_attempted_market = market.condition_id
 
         success, msg = self.manual_buy(
             direction=self.state.auto_repeat_direction,
@@ -461,8 +464,10 @@ class StrategyEngine:
         if success:
             self._log(f"✅ Auto-repeat trade placed!")
         else:
-            self._log(f"⚠️ Auto-repeat failed: {msg}")
-            # Will retry next tick
+            # Throttle the 'failed' logging to once every 60 seconds to avoid terminal spam
+            if int(time.time()) % 60 == 0:
+                self._log(f"⏳ Waiting for limit price... ({msg})")
+            # Will keep retrying next tick until price hits or market resolves
 
     # ── TP/SL Monitoring ─────────────────────────────
 

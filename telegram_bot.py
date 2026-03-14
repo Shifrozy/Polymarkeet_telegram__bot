@@ -882,21 +882,26 @@ class TelegramCommandHandler:
 
             trades = []
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[0] is None:
+                if not row or row[0] is None:
                     continue
+                
+                # Safely get values with default fallbacks to prevent IndexError on old logs
+                def get_val(idx, default):
+                    return row[idx] if len(row) > idx and row[idx] is not None else default
+
                 trades.append({
-                    "direction": row[3] or "UP",
-                    "market": row[4] or "",
-                    "timeframe": row[5] or "15m",
-                    "entry_price": float(row[6]) if row[6] else 0.50,
-                    "exit_price": float(row[7]) if row[7] else 0.50,
-                    "shares": float(row[8]) if row[8] else 10,
-                    "stake": float(row[9]) if row[9] else 5,
-                    "pnl": float(row[10]) if row[10] else 0,
-                    "close_reason": row[12] or "Unknown",
-                    "duration": float(row[14]) if row[14] else 0,
-                    "date": str(row[1]) if row[1] else "",
-                    "time": str(row[2]) if row[2] else "",
+                    "direction": get_val(3, "UP"),
+                    "market": get_val(4, ""),
+                    "timeframe": get_val(5, "15m"),
+                    "entry_price": float(get_val(6, 0.50)),
+                    "exit_price": float(get_val(7, 0.50)),
+                    "shares": float(get_val(8, 10)),
+                    "stake": float(get_val(9, 5)),
+                    "pnl": float(get_val(10, 0)),
+                    "close_reason": get_val(12, "Unknown"),
+                    "duration": float(get_val(14, 0)),
+                    "date": str(get_val(1, "")),
+                    "time": str(get_val(2, "")),
                 })
             wb.close()
 
