@@ -186,8 +186,7 @@ class StrategyEngine:
                 f"Market: {tf}"
             )
 
-            # Telegram notification is sent by the command handler
-            # (not here, to avoid double messages)
+            # Log to excel
             dir_str = direction.value
             self.logger.log_event("BUY", f"{dir_str} | ${trade.amount:.2f} | {trade.shares:.1f} shares @ ${trade.share_price:.4f} | {tf}")
 
@@ -202,6 +201,14 @@ class StrategyEngine:
             )
         else:
             err = self.trader._last_error or "Unknown error"
+            # If the error is about price range, send a notification once in a while
+            if "range" in err.lower():
+                # Throttle notification to once per market attempt or every 5 mins
+                last_notify = getattr(market, '_last_price_notify', 0)
+                if time.time() - last_notify > 300:
+                    market._last_price_notify = time.time()
+                    self.telegram.send(f"⚠️ <b>Price Alert:</b> Target hit but {err}.\nIncrease slippage or share price if you want to buy now.")
+            
             return False, f"❌ Trade failed: {err}"
 
     # ── Manual BUY on Custom Market ──────────────────
@@ -465,7 +472,7 @@ class StrategyEngine:
             self._log(f"✅ Auto-repeat trade placed!")
         else:
             # Throttle the 'failed' logging to once every 60 seconds to avoid terminal spam
-            if int(time.time()) % 60 == 0:
+            if int(time.time()) % 30 == 0:
                 self._log(f"⏳ Waiting for limit price... ({msg})")
             # Will keep retrying next tick until price hits or market resolves
 

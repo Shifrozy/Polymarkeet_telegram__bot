@@ -260,8 +260,7 @@ class TelegramNotifier:
         return self.send(msg)
 
     def send_bot_started(self) -> bool:
-        from config import PAPER_MODE
-        mode = "🔴 PAPER MODE" if PAPER_MODE else "🟢 LIVE TRADING"
+        mode = "🔴 PAPER MODE" if trading_config.paper_mode else "🟢 LIVE TRADING"
         cfg = trading_config
         msg = (
             f"🚀 <b>BOT STARTED</b>\n\n"
@@ -977,8 +976,8 @@ class TelegramCommandHandler:
 
     def _cmd_balance(self, args):
         """Show wallet balance."""
-        from config import PAPER_MODE, FUNDER_ADDRESS
-        if PAPER_MODE:
+        from config import FUNDER_ADDRESS
+        if trading_config.paper_mode:
             self.notifier.send("💰 Paper mode — no real wallet connected")
             return
         try:
@@ -1125,6 +1124,17 @@ class TelegramCommandHandler:
                     self.notifier.send("❌ Multiplier must be >= 0")
                     return
                 changes = trading_config.update(loss_multiplier=val)
+            elif param == "mode":
+                mode = value.lower()
+                if mode not in ("paper", "live"):
+                    self.notifier.send("❌ Mode must be 'paper' or 'live'")
+                    return
+                is_paper = (mode == "paper")
+                changes = trading_config.update(paper_mode=is_paper)
+                if is_paper:
+                    self.notifier.send("🔴 Switching to <b>PAPER MODE</b> (simulated)")
+                else:
+                    self.notifier.send("🟢 Switching to <b>LIVE TRADING</b> (real funds)")
             else:
                 self.notifier.send(f"❌ Unknown parameter: {param}\nType /set for list.")
                 return
@@ -1193,6 +1203,7 @@ class TelegramCommandHandler:
             "/set multiplier <i>100</i> — Recovery %\n"
             "/set shareprice <i>0.50</i> — Target price\n"
             "/set slippage <i>0.05</i> — Range ($)\n"
+            "/set mode <i>paper/live</i> — Toggle simulation\n"
             "/set market <i>5m,15m,1h</i>\n\n"
             "<b>🎮 CONTROL:</b>\n"
             "/start — Resume bot\n"

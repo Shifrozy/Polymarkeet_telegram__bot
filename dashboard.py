@@ -32,7 +32,7 @@ from candle_feed import CandleFeed, Candle
 from trade_manager import TradeManager, Trade, TradeStatus, TradeDirection
 from strategy import StrategyEngine, BotState
 from config import (
-    PAPER_MODE, FUNDER_ADDRESS, trading_config,
+    FUNDER_ADDRESS, trading_config,
 )
 
 
@@ -72,7 +72,7 @@ class Dashboard:
 
     def _build_header(self) -> Panel:
         """Build the header panel."""
-        mode = "[bold red]🔴 PAPER MODE[/bold red]" if PAPER_MODE else "[bold green]🟢 LIVE TRADING[/bold green]"
+        mode = "[bold red]🔴 PAPER MODE[/bold red]" if cfg.paper_mode else "[bold green]🟢 LIVE TRADING[/bold green]"
         uptime = time.time() - self._start_time
         h, remainder = divmod(int(uptime), 3600)
         m, s = divmod(remainder, 60)
@@ -293,7 +293,7 @@ class Dashboard:
             return
 
         try:
-            if HAS_WEB3 and FUNDER_ADDRESS and not PAPER_MODE:
+            if HAS_WEB3 and FUNDER_ADDRESS and not trading_config.paper_mode:
                 w3 = Web3(Web3.HTTPProvider("https://polygon-bor-rpc.publicnode.com"))
                 wallet = Web3.to_checksum_address(FUNDER_ADDRESS)
 
@@ -337,7 +337,7 @@ class Dashboard:
             matic = self._wallet_cache["matic"]
             positions = self._wallet_cache["positions"]
 
-        if PAPER_MODE:
+        if trading_config.paper_mode:
             lines = ["[dim]Wallet info not available in Paper Mode[/dim]"]
             return Panel(
                 "\n".join(lines),

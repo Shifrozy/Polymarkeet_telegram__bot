@@ -121,8 +121,8 @@ def validate_and_start():
         print("\n  Copy .env.example to .env and fill in your credentials.")
         sys.exit(1)
 
-    mode = "PAPER MODE" if config.PAPER_MODE else "LIVE TRADING"
-    mode_icon = "🔴" if config.PAPER_MODE else "🟢"
+    mode = "PAPER MODE" if trading_config.paper_mode else "LIVE TRADING"
+    mode_icon = "🔴" if trading_config.paper_mode else "🟢"
     print(f"  Mode: {mode_icon} {mode}")
     print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
@@ -306,7 +306,7 @@ def main():
 
     # Override paper mode if --live is passed
     if args.live:
-        config.PAPER_MODE = False
+        trading_config.update(paper_mode=False)
 
     print_banner()
     print_strategy_summary()

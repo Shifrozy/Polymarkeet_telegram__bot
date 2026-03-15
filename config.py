@@ -34,7 +34,7 @@ TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ── Mode ────────────────────────────────────────────
-PAPER_MODE: bool = os.getenv("PAPER_MODE", "true").lower() == "true"
+# PAPER_MODE is now part of TradingConfig for runtime toggling
 AUTO_RESTART: bool = os.getenv("AUTO_RESTART", "true").lower() == "true"
 AUTO_REPEAT: bool = os.getenv("AUTO_REPEAT", "false").lower() == "true"
 
@@ -48,6 +48,9 @@ class TradingConfig:
     _lock = threading.Lock()
 
     def __init__(self):
+        # ── Mode ────────────────────────────────────
+        self.paper_mode: bool = os.getenv("PAPER_MODE", "true").lower() == "true"
+
         # ── Strategy Direction ──────────────────────
         self.strategy_direction: str = os.getenv("STRATEGY_DIRECTION", "LONG").upper()
 
@@ -150,6 +153,7 @@ class TradingConfig:
                 "max_trades_per_day": self.max_trades_per_day,
                 "loss_multiplier": self.loss_multiplier,
                 "bot_running": self.bot_running,
+                "paper_mode": self.paper_mode,
             }
 
     def __repr__(self) -> str:
@@ -164,7 +168,7 @@ trading_config = TradingConfig()
 def validate_config() -> list[str]:
     """Return a list of config errors (empty = all good)."""
     errors = []
-    if not PAPER_MODE:
+    if not trading_config.paper_mode:
         if not PRIVATE_KEY or PRIVATE_KEY == "0x_your_private_key_here":
             errors.append("PRIVATE_KEY is not set in .env")
         if not FUNDER_ADDRESS or FUNDER_ADDRESS == "0x_your_wallet_address_here":

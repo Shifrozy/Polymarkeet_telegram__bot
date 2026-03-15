@@ -15,7 +15,7 @@ from typing import Optional
 from enum import Enum
 
 from config import (
-    PAPER_MODE, CLOB_HOST, CHAIN_ID,
+    CLOB_HOST, CHAIN_ID,
     PRIVATE_KEY, FUNDER_ADDRESS, SIGNATURE_TYPE,
     trading_config,
 )
@@ -134,7 +134,7 @@ class TradeManager:
         """Initialize the Polymarket CLOB client (lazy)."""
         if self._client_initialized:
             return
-        if PAPER_MODE:
+        if trading_config.paper_mode:
             self._client_initialized = True
             return
         try:
@@ -254,7 +254,7 @@ class TradeManager:
         trade_id = f"T{int(time.time() * 1000)}"
         order_id = ""
 
-        if PAPER_MODE:
+        if trading_config.paper_mode:
             order_id = f"PAPER-{trade_id}"
         else:
             try:
@@ -343,7 +343,7 @@ class TradeManager:
         Place a SELL order on Polymarket CLOB to exit a position.
         Returns (success, sell_order_id).
         """
-        if PAPER_MODE:
+        if trading_config.paper_mode:
             return True, f"PAPER-SELL-{trade.trade_id}"
 
         self._init_client()
@@ -583,7 +583,7 @@ class TradeManager:
 
     def redeem_winnings(self) -> int:
         """Automated redemption of winning positions in live mode."""
-        if PAPER_MODE:
+        if trading_config.paper_mode:
             return 0
         self._init_client()
         if self._redeem_manager:
